@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package driver;
+
+option go_package = "lastmile/gen/go/driver";
+
+message Driver {
+  string id = 1;
+  string name = 2;
+  string car_details = 3;
+}
+
+message Route {
+  string id = 1;
+  string driver_id = 2;
+  repeated string target_station_ids = 3;
+  int32 available_seats = 4;
+}
+
+
+message RegisterDriverRequest {
+  Driver driver = 1;
+}
+
+message RegisterDriverResponse {
+  string id = 1;
+}
+
+message RegisterRouteRequest {
+  Route route = 1;
+}
+
+message RegisterRouteResponse {
+  string id = 1;
+}
+
+service DriverService {
+  rpc RegisterDriver(RegisterDriverRequest) returns (RegisterDriverResponse);
+  rpc RegisterRoute(RegisterRouteRequest) returns (RegisterRouteResponse);
+}

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package matching;
+
+import "api/trip.proto";
+
+option go_package = "lastmile/gen/go/matching";
+
+message MatchRequest {
+  string driver_id = 1;
+  string station_id = 2;
+}
+
+message MatchResponse {
+  repeated trip.Trip trips = 1;
+}
+
+service MatchingService {
+  rpc Match(MatchRequest) returns (MatchResponse);
+}

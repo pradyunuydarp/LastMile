@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matching
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: matching
+  template:
+    metadata:
+      labels:
+        app: matching
+    spec:
+      containers:
+      - name: matching
+        image: lastmile/matching:latest
+        ports:
+        - containerPort: 50051
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: matching
+spec:
+  selector:
+    app: matching
+  ports:
+    - protocol: TCP
+      port: 50051
+      targetPort: 50051
+  type: ClusterIP

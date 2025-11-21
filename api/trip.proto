@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package trip;
+
+option go_package = "lastmile/gen/go/trip";
+
+message Trip {
+  string id = 1;
+  string driver_id = 2;
+  string rider_id = 3;
+  string status = 4; // e.g., "pending", "accepted", "in_progress", "completed", "cancelled"
+}
+
+message GetTripRequest {
+    string id = 1;
+}
+
+message GetTripResponse {
+    Trip trip = 1;
+}
+
+message UpdateTripRequest {
+    string id = 1;
+    string status = 2;
+}
+
+message UpdateTripResponse {
+    Trip trip = 1;
+}
+
+service TripService {
+    rpc GetTrip(GetTripRequest) returns (GetTripResponse);
+    rpc UpdateTrip(UpdateTripRequest) returns (UpdateTripResponse);
+}

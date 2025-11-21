@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package location;
+
+option go_package = "lastmile/gen/go/location";
+
+message Location {
+    string driver_id = 1;
+    double latitude = 2;
+    double longitude = 3;
+}
+
+message UpdateLocationRequest {
+    Location location = 1;
+}
+
+message UpdateLocationResponse {
+    bool success = 1;
+}
+
+service LocationService {
+  rpc UpdateLocation(stream UpdateLocationRequest) returns (UpdateLocationResponse);
+}

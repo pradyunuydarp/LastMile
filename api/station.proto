@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package station;
+
+option go_package = "lastmile/gen/go/station";
+
+message Station {
+  string id = 1;
+  string name = 2;
+  repeated string nearby_areas = 3;
+}
+
+message AddStationRequest {
+  Station station = 1;
+}
+
+message AddStationResponse {
+  string id = 1;
+}
+
+message GetStationRequest {
+  string id = 1;
+}
+
+message GetStationResponse {
+  Station station = 1;
+}
+
+service StationService {
+  rpc AddStation(AddStationRequest) returns (AddStationResponse);
+  rpc GetStation(GetStationRequest) returns (GetStationResponse);
+}
