@@ -15,6 +15,7 @@ message Route {
   string driver_id = 2;
   repeated string target_station_ids = 3;
   int32 available_seats = 4;
+  string destination = 5;
 }
 
 
@@ -34,7 +35,15 @@ message RegisterRouteResponse {
   string id = 1;
 }
 
+message ListDriversRequest {}
+
+message ListDriversResponse {
+  repeated Driver drivers = 1;
+  repeated Route routes = 2;
+}
+
 service DriverService {
   rpc RegisterDriver(RegisterDriverRequest) returns (RegisterDriverResponse);
   rpc RegisterRoute(RegisterRouteRequest) returns (RegisterRouteResponse);
+  rpc ListDrivers(ListDriversRequest) returns (ListDriversResponse);
 }

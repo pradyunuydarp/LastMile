@@ -1,0 +1,492 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lastmile
+---
+# Driver Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driver
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: driver
+  template:
+    metadata:
+      labels:
+        app: driver
+    spec:
+      containers:
+        - name: driver
+          image: pradyunuydarp/lastmile-driver:latest # replace with your registry image
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DRIVER_GRPC_ADDR
+              value: ":50051"
+          ports:
+            - containerPort: 50051
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: driver
+  namespace: lastmile
+spec:
+  selector:
+    app: driver
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+---
+# Rider Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rider
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rider
+  template:
+    metadata:
+      labels:
+        app: rider
+    spec:
+      containers:
+        - name: rider
+          image: pradyunuydarp/lastmile-rider:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RIDER_GRPC_ADDR
+              value: ":50055"
+          ports:
+            - containerPort: 50055
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 50055
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rider
+  namespace: lastmile
+spec:
+  selector:
+    app: rider
+  ports:
+    - name: grpc
+      port: 50055
+      targetPort: 50055
+---
+# Station Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: station
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: station
+  template:
+    metadata:
+      labels:
+        app: station
+    spec:
+      containers:
+        - name: station
+          image: pradyunuydarp/lastmile-station:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: STATION_GRPC_ADDR
+              value: ":50056"
+          ports:
+            - containerPort: 50056
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 50056
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: station
+  namespace: lastmile
+spec:
+  selector:
+    app: station
+  ports:
+    - name: grpc
+      port: 50056
+      targetPort: 50056
+---
+# Trip Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trip
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trip
+  template:
+    metadata:
+      labels:
+        app: trip
+    spec:
+      containers:
+        - name: trip
+          image: pradyunuydarp/lastmile-trip:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TRIP_GRPC_ADDR
+              value: ":50057"
+          ports:
+            - containerPort: 50057
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 50057
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trip
+  namespace: lastmile
+spec:
+  selector:
+    app: trip
+  ports:
+    - name: grpc
+      port: 50057
+      targetPort: 50057
+---
+# Notification Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification
+  template:
+    metadata:
+      labels:
+        app: notification
+    spec:
+      containers:
+        - name: notification
+          image: pradyunuydarp/lastmile-notification:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NOTIFICATION_GRPC_ADDR
+              value: ":50058"
+          ports:
+            - containerPort: 50058
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 50058
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification
+  namespace: lastmile
+spec:
+  selector:
+    app: notification
+  ports:
+    - name: grpc
+      port: 50058
+      targetPort: 50058
+---
+# Location Service (with matching proximity trigger)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: location
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: location
+  template:
+    metadata:
+      labels:
+        app: location
+    spec:
+      containers:
+        - name: location
+          image: pradyunuydarp/lastmile-location:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LOCATION_GRPC_ADDR
+              value: ":50054"
+            - name: MATCHING_ADDR
+              value: "matching.lastmile.svc.cluster.local:50053"
+          ports:
+            - containerPort: 50054
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 50054
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: location
+  namespace: lastmile
+spec:
+  selector:
+    app: location
+  ports:
+    - name: grpc
+      port: 50054
+      targetPort: 50054
+---
+# Matching Service (scale 1→5 via HPA)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matching
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: matching
+  template:
+    metadata:
+      labels:
+        app: matching
+    spec:
+      containers:
+        - name: matching
+          image: pradyunuydarp/lastmile-matching:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MATCHING_GRPC_ADDR
+              value: ":50053"
+          ports:
+            - containerPort: 50053
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            tcpSocket:
+              port: 50053
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: matching
+  namespace: lastmile
+spec:
+  selector:
+    app: matching
+  ports:
+    - name: grpc
+      port: 50053
+      targetPort: 50053
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: matching
+  namespace: lastmile
+spec:
+  minReplicas: 1
+  maxReplicas: 5
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: matching
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+---
+# User Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user
+  template:
+    metadata:
+      labels:
+        app: user
+    spec:
+      containers:
+        - name: user
+          image: pradyunuydarp/lastmile-user:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: USER_GRPC_ADDR
+              value: ":50052"
+          ports:
+            - containerPort: 50052
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 50052
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user
+  namespace: lastmile
+spec:
+  selector:
+    app: user
+  ports:
+    - name: grpc
+      port: 50052
+      targetPort: 50052
+---
+# Gateway (gRPC + HTTP for mobile)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: pradyunuydarp/lastmile-gateway:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GATEWAY_GRPC_ADDR
+              value: ":50060"
+            - name: GATEWAY_HTTP_ADDR
+              value: ":8082"
+          ports:
+            - containerPort: 50060
+            - containerPort: 8082
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            tcpSocket:
+              port: 8082
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: lastmile
+spec:
+  selector:
+    app: gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8082
+    - name: grpc
+      port: 50060
+      targetPort: 50060
+  type: ClusterIP

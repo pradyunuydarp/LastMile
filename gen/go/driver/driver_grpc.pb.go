@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	DriverService_RegisterDriver_FullMethodName = "/driver.DriverService/RegisterDriver"
 	DriverService_RegisterRoute_FullMethodName  = "/driver.DriverService/RegisterRoute"
+	DriverService_ListDrivers_FullMethodName    = "/driver.DriverService/ListDrivers"
 )
 
 // DriverServiceClient is the client API for DriverService service.
@@ -29,6 +30,7 @@ const (
 type DriverServiceClient interface {
 	RegisterDriver(ctx context.Context, in *RegisterDriverRequest, opts ...grpc.CallOption) (*RegisterDriverResponse, error)
 	RegisterRoute(ctx context.Context, in *RegisterRouteRequest, opts ...grpc.CallOption) (*RegisterRouteResponse, error)
+	ListDrivers(ctx context.Context, in *ListDriversRequest, opts ...grpc.CallOption) (*ListDriversResponse, error)
 }
 
 type driverServiceClient struct {
@@ -59,12 +61,23 @@ func (c *driverServiceClient) RegisterRoute(ctx context.Context, in *RegisterRou
 	return out, nil
 }
 
+func (c *driverServiceClient) ListDrivers(ctx context.Context, in *ListDriversRequest, opts ...grpc.CallOption) (*ListDriversResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDriversResponse)
+	err := c.cc.Invoke(ctx, DriverService_ListDrivers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DriverServiceServer is the server API for DriverService service.
 // All implementations must embed UnimplementedDriverServiceServer
 // for forward compatibility.
 type DriverServiceServer interface {
 	RegisterDriver(context.Context, *RegisterDriverRequest) (*RegisterDriverResponse, error)
 	RegisterRoute(context.Context, *RegisterRouteRequest) (*RegisterRouteResponse, error)
+	ListDrivers(context.Context, *ListDriversRequest) (*ListDriversResponse, error)
 	mustEmbedUnimplementedDriverServiceServer()
 }
 
@@ -80,6 +93,9 @@ func (UnimplementedDriverServiceServer) RegisterDriver(context.Context, *Registe
 }
 func (UnimplementedDriverServiceServer) RegisterRoute(context.Context, *RegisterRouteRequest) (*RegisterRouteResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterRoute not implemented")
+}
+func (UnimplementedDriverServiceServer) ListDrivers(context.Context, *ListDriversRequest) (*ListDriversResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListDrivers not implemented")
 }
 func (UnimplementedDriverServiceServer) mustEmbedUnimplementedDriverServiceServer() {}
 func (UnimplementedDriverServiceServer) testEmbeddedByValue()                       {}
@@ -138,6 +154,24 @@ func _DriverService_RegisterRoute_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DriverService_ListDrivers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDriversRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DriverServiceServer).ListDrivers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DriverService_ListDrivers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DriverServiceServer).ListDrivers(ctx, req.(*ListDriversRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DriverService_ServiceDesc is the grpc.ServiceDesc for DriverService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -152,6 +186,10 @@ var DriverService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterRoute",
 			Handler:    _DriverService_RegisterRoute_Handler,
+		},
+		{
+			MethodName: "ListDrivers",
+			Handler:    _DriverService_ListDrivers_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

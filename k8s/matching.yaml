@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: matching
-        image: lastmile/matching:latest
+        image: pradyunuydarp/lastmile-matching:latest
         ports:
         - containerPort: 50051
 

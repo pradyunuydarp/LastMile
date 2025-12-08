@@ -19,7 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LocationService_UpdateLocation_FullMethodName = "/location.LocationService/UpdateLocation"
+	LocationService_UpdateLocation_FullMethodName           = "/location.LocationService/UpdateLocation"
+	LocationService_SubscribeLocationUpdates_FullMethodName = "/location.LocationService/SubscribeLocationUpdates"
+	LocationService_GetDriverLocations_FullMethodName       = "/location.LocationService/GetDriverLocations"
 )
 
 // LocationServiceClient is the client API for LocationService service.
@@ -27,6 +29,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LocationServiceClient interface {
 	UpdateLocation(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UpdateLocationRequest, UpdateLocationResponse], error)
+	SubscribeLocationUpdates(ctx context.Context, in *SubscribeLocationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LocationUpdate], error)
+	GetDriverLocations(ctx context.Context, in *GetDriverLocationsRequest, opts ...grpc.CallOption) (*GetDriverLocationsResponse, error)
 }
 
 type locationServiceClient struct {
@@ -50,11 +54,42 @@ func (c *locationServiceClient) UpdateLocation(ctx context.Context, opts ...grpc
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type LocationService_UpdateLocationClient = grpc.ClientStreamingClient[UpdateLocationRequest, UpdateLocationResponse]
 
+func (c *locationServiceClient) SubscribeLocationUpdates(ctx context.Context, in *SubscribeLocationRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LocationUpdate], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &LocationService_ServiceDesc.Streams[1], LocationService_SubscribeLocationUpdates_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SubscribeLocationRequest, LocationUpdate]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type LocationService_SubscribeLocationUpdatesClient = grpc.ServerStreamingClient[LocationUpdate]
+
+func (c *locationServiceClient) GetDriverLocations(ctx context.Context, in *GetDriverLocationsRequest, opts ...grpc.CallOption) (*GetDriverLocationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetDriverLocationsResponse)
+	err := c.cc.Invoke(ctx, LocationService_GetDriverLocations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LocationServiceServer is the server API for LocationService service.
 // All implementations must embed UnimplementedLocationServiceServer
 // for forward compatibility.
 type LocationServiceServer interface {
 	UpdateLocation(grpc.ClientStreamingServer[UpdateLocationRequest, UpdateLocationResponse]) error
+	SubscribeLocationUpdates(*SubscribeLocationRequest, grpc.ServerStreamingServer[LocationUpdate]) error
+	GetDriverLocations(context.Context, *GetDriverLocationsRequest) (*GetDriverLocationsResponse, error)
 	mustEmbedUnimplementedLocationServiceServer()
 }
 
@@ -67,6 +102,12 @@ type UnimplementedLocationServiceServer struct{}
 
 func (UnimplementedLocationServiceServer) UpdateLocation(grpc.ClientStreamingServer[UpdateLocationRequest, UpdateLocationResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method UpdateLocation not implemented")
+}
+func (UnimplementedLocationServiceServer) SubscribeLocationUpdates(*SubscribeLocationRequest, grpc.ServerStreamingServer[LocationUpdate]) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeLocationUpdates not implemented")
+}
+func (UnimplementedLocationServiceServer) GetDriverLocations(context.Context, *GetDriverLocationsRequest) (*GetDriverLocationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDriverLocations not implemented")
 }
 func (UnimplementedLocationServiceServer) mustEmbedUnimplementedLocationServiceServer() {}
 func (UnimplementedLocationServiceServer) testEmbeddedByValue()                         {}
@@ -96,18 +137,57 @@ func _LocationService_UpdateLocation_Handler(srv interface{}, stream grpc.Server
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type LocationService_UpdateLocationServer = grpc.ClientStreamingServer[UpdateLocationRequest, UpdateLocationResponse]
 
+func _LocationService_SubscribeLocationUpdates_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeLocationRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(LocationServiceServer).SubscribeLocationUpdates(m, &grpc.GenericServerStream[SubscribeLocationRequest, LocationUpdate]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type LocationService_SubscribeLocationUpdatesServer = grpc.ServerStreamingServer[LocationUpdate]
+
+func _LocationService_GetDriverLocations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDriverLocationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LocationServiceServer).GetDriverLocations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LocationService_GetDriverLocations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LocationServiceServer).GetDriverLocations(ctx, req.(*GetDriverLocationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LocationService_ServiceDesc is the grpc.ServiceDesc for LocationService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var LocationService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "location.LocationService",
 	HandlerType: (*LocationServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetDriverLocations",
+			Handler:    _LocationService_GetDriverLocations_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "UpdateLocation",
 			Handler:       _LocationService_UpdateLocation_Handler,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "SubscribeLocationUpdates",
+			Handler:       _LocationService_SubscribeLocationUpdates_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "api/location.proto",

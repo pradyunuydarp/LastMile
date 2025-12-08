@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: notification
-        image: lastmile/notification:latest
+        image: pradyunuydarp/lastmile-notification:latest
         ports:
         - containerPort: 50051
 

@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "lastmile/gen/go/user";
+
+enum UserRole {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_RIDER = 1;
+  USER_ROLE_DRIVER = 2;
+  USER_ROLE_ADMIN = 3;
+}
+
+message User {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  UserRole role = 4;
+}
+
+message RegisterUserRequest {
+  User user = 1;
+}
+
+message RegisterUserResponse {
+  string id = 1;
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message SignUpRequest {
+  string email = 1;
+  string password = 2;
+  string name = 3;
+  UserRole role = 4;
+}
+
+message SignUpResponse {
+  string id = 1;
+  string email = 2;
+  string access_token = 3;
+}
+
+message SignInRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message SignInResponse {
+  string id = 1;
+  string email = 2;
+  string access_token = 3;
+  User user = 4;
+}
+
+message ForgotPasswordRequest {
+  string email = 1;
+}
+
+message ForgotPasswordResponse {
+  bool success = 1;
+}
+
+service UserService {
+  rpc RegisterUser(RegisterUserRequest) returns (RegisterUserResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  
+  rpc SignUp(SignUpRequest) returns (SignUpResponse);
+  rpc SignIn(SignInRequest) returns (SignInResponse);
+  rpc ForgotPassword(ForgotPasswordRequest) returns (ForgotPasswordResponse);
+}

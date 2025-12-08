@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: driver
-        image: lastmile/driver:latest
+        image: pradyunuydarp/lastmile-driver:latest
         ports:
         - containerPort: 50051
 

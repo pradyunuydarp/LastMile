@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "LastMile",
+    "slug": "lastmile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "lastmile",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lastmile.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app needs access to your location to show nearby drivers and stations.",
+        "NSUserNotificationUsageDescription": "We use notifications to let you know when drivers accept your ride."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f172a"
+      },
+      "package": "com.lastmile.app"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b7b5eda9-9eec-4f72-8540-33f031402806"
+      },
+      "router": {}
+    },
+    "plugins": [
+      "expo-router",
+      "react-native-maps",
+      "expo-notifications"
+    ],
+    "owner": "pradyunuydarp"
+  }
+}

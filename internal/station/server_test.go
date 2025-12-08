@@ -19,7 +19,7 @@ func TestAddStation(t *testing.T) {
 
 	req := &pb.AddStationRequest{
 		Station: &pb.Station{
-			Name:         "Central Station",
+			Name:        "Central Station",
 			NearbyAreas: []string{"Downtown", "Midtown"},
 		},
 	}
@@ -41,8 +41,8 @@ func TestGetStation(t *testing.T) {
 
 	// Add a station first
 	addedStation := &pb.Station{
-		Id:           "test-station-id",
-		Name:         "Test Station",
+		Id:          "test-station-id",
+		Name:        "Test Station",
 		NearbyAreas: []string{"Test Area"},
 	}
 	s.stations[addedStation.Id] = addedStation

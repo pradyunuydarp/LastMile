@@ -1,0 +1,46 @@
+{
+  "name": "lastmile-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "start": "EXPO_USE_METRO_WORKSPACE_ROOT=1 EXPO_DEV_SERVER_PORT=8081 EXPO_METRO_PORT=8081 EXPO_JS_SERVER_PORT=8081 RCT_METRO_PORT=8081 PORT=8081 pnpm exec expo start --port 8081 --clear",
+    "ios": "EXPO_USE_METRO_WORKSPACE_ROOT=1 EXPO_DEV_SERVER_PORT=8081 EXPO_METRO_PORT=8081 EXPO_JS_SERVER_PORT=8081 RCT_METRO_PORT=8081 PORT=8081 PATH=\"$(brew --prefix)/bin:$PATH\" pnpm exec expo run:ios --port 8081",
+    "postinstall": "node scripts/fix-expo-router.js",
+    "android": "pnpm exec expo run:android",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.0",
+    "@react-native-community/cli": "^20.0.2",
+    "@react-navigation/bottom-tabs": "^7.8.6",
+    "@react-navigation/native": "^7.1.21",
+    "@react-navigation/stack": "^7.6.7",
+    "@supabase/supabase-js": "^2.84.0",
+    "add": "^2.0.6",
+    "expo": "^54.0.0",
+    "expo-device": "~6.0.2",
+    "expo-blur": "~15.0.0",
+    "expo-linear-gradient": "~15.0.0",
+    "expo-location": "^19.0.7",
+    "expo-notifications": "~0.32.0",
+    "expo-router": "^6.0.15",
+    "expo-status-bar": "~3.0.0",
+    "pnpm": "^10.23.0",
+    "socket.io-client": "^4.8.1",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-gesture-handler": "~2.28.0",
+    "react-native-maps": "^1.26.18",
+    "react-native-safe-area-context": "^5.6.2",
+    "react-native-screens": "~4.16.0",
+    "react-native-url-polyfill": "^3.0.0"
+  },
+  "devDependencies": {
+    "@react-native-community/eslint-config": "^3.2.0",
+    "@types/react": "~19.1.10",
+    "eslint": "^8.57.1",
+    "typescript": "~5.9.2"
+  }
+}

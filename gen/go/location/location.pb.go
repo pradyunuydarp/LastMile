@@ -169,6 +169,198 @@ func (x *UpdateLocationResponse) GetSuccess() bool {
 	return false
 }
 
+type GetDriverLocationsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DriverIds     []string               `protobuf:"bytes,1,rep,name=driver_ids,json=driverIds,proto3" json:"driver_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDriverLocationsRequest) Reset() {
+	*x = GetDriverLocationsRequest{}
+	mi := &file_api_location_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDriverLocationsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDriverLocationsRequest) ProtoMessage() {}
+
+func (x *GetDriverLocationsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_location_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDriverLocationsRequest.ProtoReflect.Descriptor instead.
+func (*GetDriverLocationsRequest) Descriptor() ([]byte, []int) {
+	return file_api_location_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetDriverLocationsRequest) GetDriverIds() []string {
+	if x != nil {
+		return x.DriverIds
+	}
+	return nil
+}
+
+type GetDriverLocationsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Locations     []*Location            `protobuf:"bytes,1,rep,name=locations,proto3" json:"locations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDriverLocationsResponse) Reset() {
+	*x = GetDriverLocationsResponse{}
+	mi := &file_api_location_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDriverLocationsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDriverLocationsResponse) ProtoMessage() {}
+
+func (x *GetDriverLocationsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_location_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDriverLocationsResponse.ProtoReflect.Descriptor instead.
+func (*GetDriverLocationsResponse) Descriptor() ([]byte, []int) {
+	return file_api_location_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *GetDriverLocationsResponse) GetLocations() []*Location {
+	if x != nil {
+		return x.Locations
+	}
+	return nil
+}
+
+type SubscribeLocationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DriverId      string                 `protobuf:"bytes,1,opt,name=driver_id,json=driverId,proto3" json:"driver_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeLocationRequest) Reset() {
+	*x = SubscribeLocationRequest{}
+	mi := &file_api_location_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeLocationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeLocationRequest) ProtoMessage() {}
+
+func (x *SubscribeLocationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_location_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeLocationRequest.ProtoReflect.Descriptor instead.
+func (*SubscribeLocationRequest) Descriptor() ([]byte, []int) {
+	return file_api_location_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SubscribeLocationRequest) GetDriverId() string {
+	if x != nil {
+		return x.DriverId
+	}
+	return ""
+}
+
+type LocationUpdate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DriverId      string                 `protobuf:"bytes,1,opt,name=driver_id,json=driverId,proto3" json:"driver_id,omitempty"`
+	Latitude      float64                `protobuf:"fixed64,2,opt,name=latitude,proto3" json:"latitude,omitempty"`
+	Longitude     float64                `protobuf:"fixed64,3,opt,name=longitude,proto3" json:"longitude,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LocationUpdate) Reset() {
+	*x = LocationUpdate{}
+	mi := &file_api_location_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LocationUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LocationUpdate) ProtoMessage() {}
+
+func (x *LocationUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_api_location_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LocationUpdate.ProtoReflect.Descriptor instead.
+func (*LocationUpdate) Descriptor() ([]byte, []int) {
+	return file_api_location_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *LocationUpdate) GetDriverId() string {
+	if x != nil {
+		return x.DriverId
+	}
+	return ""
+}
+
+func (x *LocationUpdate) GetLatitude() float64 {
+	if x != nil {
+		return x.Latitude
+	}
+	return 0
+}
+
+func (x *LocationUpdate) GetLongitude() float64 {
+	if x != nil {
+		return x.Longitude
+	}
+	return 0
+}
+
 var File_api_location_proto protoreflect.FileDescriptor
 
 const file_api_location_proto_rawDesc = "" +
@@ -181,9 +373,22 @@ const file_api_location_proto_rawDesc = "" +
 	"\x15UpdateLocationRequest\x12.\n" +
 	"\blocation\x18\x01 \x01(\v2\x12.location.LocationR\blocation\"2\n" +
 	"\x16UpdateLocationResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess2h\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\":\n" +
+	"\x19GetDriverLocationsRequest\x12\x1d\n" +
+	"\n" +
+	"driver_ids\x18\x01 \x03(\tR\tdriverIds\"N\n" +
+	"\x1aGetDriverLocationsResponse\x120\n" +
+	"\tlocations\x18\x01 \x03(\v2\x12.location.LocationR\tlocations\"7\n" +
+	"\x18SubscribeLocationRequest\x12\x1b\n" +
+	"\tdriver_id\x18\x01 \x01(\tR\bdriverId\"g\n" +
+	"\x0eLocationUpdate\x12\x1b\n" +
+	"\tdriver_id\x18\x01 \x01(\tR\bdriverId\x12\x1a\n" +
+	"\blatitude\x18\x02 \x01(\x01R\blatitude\x12\x1c\n" +
+	"\tlongitude\x18\x03 \x01(\x01R\tlongitude2\xa5\x02\n" +
 	"\x0fLocationService\x12U\n" +
-	"\x0eUpdateLocation\x12\x1f.location.UpdateLocationRequest\x1a .location.UpdateLocationResponse(\x01B\x1aZ\x18lastmile/gen/go/locationb\x06proto3"
+	"\x0eUpdateLocation\x12\x1f.location.UpdateLocationRequest\x1a .location.UpdateLocationResponse(\x01\x12Z\n" +
+	"\x18SubscribeLocationUpdates\x12\".location.SubscribeLocationRequest\x1a\x18.location.LocationUpdate0\x01\x12_\n" +
+	"\x12GetDriverLocations\x12#.location.GetDriverLocationsRequest\x1a$.location.GetDriverLocationsResponseB\x1aZ\x18lastmile/gen/go/locationb\x06proto3"
 
 var (
 	file_api_location_proto_rawDescOnce sync.Once
@@ -197,21 +402,30 @@ func file_api_location_proto_rawDescGZIP() []byte {
 	return file_api_location_proto_rawDescData
 }
 
-var file_api_location_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_api_location_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_api_location_proto_goTypes = []any{
-	(*Location)(nil),               // 0: location.Location
-	(*UpdateLocationRequest)(nil),  // 1: location.UpdateLocationRequest
-	(*UpdateLocationResponse)(nil), // 2: location.UpdateLocationResponse
+	(*Location)(nil),                   // 0: location.Location
+	(*UpdateLocationRequest)(nil),      // 1: location.UpdateLocationRequest
+	(*UpdateLocationResponse)(nil),     // 2: location.UpdateLocationResponse
+	(*GetDriverLocationsRequest)(nil),  // 3: location.GetDriverLocationsRequest
+	(*GetDriverLocationsResponse)(nil), // 4: location.GetDriverLocationsResponse
+	(*SubscribeLocationRequest)(nil),   // 5: location.SubscribeLocationRequest
+	(*LocationUpdate)(nil),             // 6: location.LocationUpdate
 }
 var file_api_location_proto_depIdxs = []int32{
 	0, // 0: location.UpdateLocationRequest.location:type_name -> location.Location
-	1, // 1: location.LocationService.UpdateLocation:input_type -> location.UpdateLocationRequest
-	2, // 2: location.LocationService.UpdateLocation:output_type -> location.UpdateLocationResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // 1: location.GetDriverLocationsResponse.locations:type_name -> location.Location
+	1, // 2: location.LocationService.UpdateLocation:input_type -> location.UpdateLocationRequest
+	5, // 3: location.LocationService.SubscribeLocationUpdates:input_type -> location.SubscribeLocationRequest
+	3, // 4: location.LocationService.GetDriverLocations:input_type -> location.GetDriverLocationsRequest
+	2, // 5: location.LocationService.UpdateLocation:output_type -> location.UpdateLocationResponse
+	6, // 6: location.LocationService.SubscribeLocationUpdates:output_type -> location.LocationUpdate
+	4, // 7: location.LocationService.GetDriverLocations:output_type -> location.GetDriverLocationsResponse
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_api_location_proto_init() }
@@ -225,7 +439,7 @@ func file_api_location_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_location_proto_rawDesc), len(file_api_location_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package gateway;
+
+option go_package = "lastmile/gen/go/gateway";
+
+message SnapshotRequest {}
+
+message GatewayRoute {
+  string id = 1;
+  repeated string target_station_ids = 2;
+  string destination = 3;
+  repeated GatewayPickupPoint pickup_points = 4;
+}
+
+message GatewayPickupPoint {
+  string id = 1;
+  string name = 2;
+  string station_id = 3;
+  string station_name = 4;
+  double latitude = 5;
+  double longitude = 6;
+}
+
+message GatewayDriver {
+  string id = 1;
+  string name = 2;
+  string car_details = 3;
+  int32 seats_available = 4;
+  int32 eta_minutes = 5;
+  string status = 6;
+  GatewayRoute route = 7;
+  double latitude = 8;
+  double longitude = 9;
+}
+
+message GatewayRider {
+  string id = 1;
+  string name = 2;
+  string destination = 3;
+  string arrival_time = 4; // ISO timestamp
+  string station_id = 5;
+  string status = 6;
+}
+
+message GatewayTrip {
+  string id = 1;
+  string driver_id = 2;
+  string rider_id = 3;
+  string station_id = 4;
+  string destination = 5;
+  int32 eta_minutes = 6;
+  string status = 7;
+  string created_at = 8; // ISO timestamp
+  string pickup_point_id = 9;
+  GatewayPickupPoint pickup = 10;
+}
+
+message GatewayStation {
+  string id = 1;
+  string name = 2;
+  repeated string nearby_areas = 3;
+  double load_factor = 4;
+  double latitude = 5;
+  double longitude = 6;
+}
+
+message BackendMetrics {
+  int32 pending_matches = 1;
+  int32 riders_waiting = 2;
+  int32 seats_open = 3;
+  double avg_wait_minutes = 4;
+  string version = 5;
+}
+
+message BackendSnapshot {
+  repeated GatewayDriver drivers = 1;
+  repeated GatewayRider riders = 2;
+  repeated GatewayTrip trips = 3;
+  repeated GatewayStation stations = 4;
+  BackendMetrics metrics = 5;
+  GatewayTrip highlight_trip = 6;
+  string last_updated = 7;
+}
+
+message TriggerMatchRequest {
+  string driver_id = 1;
+  string station_id = 2;
+}
+
+service GatewayService {
+  rpc GetSnapshot(SnapshotRequest) returns (BackendSnapshot);
+  rpc TriggerMatch(TriggerMatchRequest) returns (GatewayTrip);
+}

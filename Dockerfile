@@ -20,10 +20,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/matching ./cmd/matching
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/trip ./cmd/trip
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/notification ./cmd/notification
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/user ./cmd/user
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/gateway ./cmd/gateway
 
 # Stage 2: Create the final minimal image
 FROM gcr.io/distroless/static-debian11
 
 ARG SERVICE
-COPY --from=builder /bin/$SERVICE /
-ENTRYPOINT ["/"]
+COPY --from=builder /bin/${SERVICE} /service
+ENTRYPOINT ["/service"]

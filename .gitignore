@@ -27,14 +27,40 @@ w to include it)
 go.work                                          
 go.work.sum                                      
                                                  
-# env file                                       
-.env                                             
+# env files                                       
+.env                                              
+.env.*                                            
+*.env                                            
                                                  
-# Editor/IDE                                     
-# .idea/                                         
-# .vscode/                                       
+# Editor/IDE                                      
+.idea/                                         
+.vscode/                                        
+.zed/
 
 # Gemini CLI build/cache outputs
 .gocache/
 .gomodcache/
 lastmile/
+
+# macOS cruft
+.DS_Store
+
+# Node / React Native artifacts
+node_modules/
+pnpm-lock.yaml
+mobile/.expo/
+mobile/.expo-shared/
+mobile/node_modules/
+mobile/pnpm-lock.yaml
+mobile/dist/
+mobile/build/
+
+# iOS / CocoaPods
+mobile/ios/Pods/
+mobile/ios/build/
+mobile/ios/DerivedData/
+mobile/ios/*.xcworkspace
+
+# Expo / Metro caches
+mobile/.metro*
+mobile/.cache/

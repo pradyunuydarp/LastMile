@@ -27,6 +27,10 @@ type Trip struct {
 	DriverId      string                 `protobuf:"bytes,2,opt,name=driver_id,json=driverId,proto3" json:"driver_id,omitempty"`
 	RiderId       string                 `protobuf:"bytes,3,opt,name=rider_id,json=riderId,proto3" json:"rider_id,omitempty"`
 	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // e.g., "pending", "accepted", "in_progress", "completed", "cancelled"
+	StationId     string                 `protobuf:"bytes,5,opt,name=station_id,json=stationId,proto3" json:"station_id,omitempty"`
+	Destination   string                 `protobuf:"bytes,6,opt,name=destination,proto3" json:"destination,omitempty"`
+	EtaMinutes    int32                  `protobuf:"varint,7,opt,name=eta_minutes,json=etaMinutes,proto3" json:"eta_minutes,omitempty"`
+	CreatedAt     string                 `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // ISO timestamp
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -85,6 +89,34 @@ func (x *Trip) GetRiderId() string {
 func (x *Trip) GetStatus() string {
 	if x != nil {
 		return x.Status
+	}
+	return ""
+}
+
+func (x *Trip) GetStationId() string {
+	if x != nil {
+		return x.StationId
+	}
+	return ""
+}
+
+func (x *Trip) GetDestination() string {
+	if x != nil {
+		return x.Destination
+	}
+	return ""
+}
+
+func (x *Trip) GetEtaMinutes() int32 {
+	if x != nil {
+		return x.EtaMinutes
+	}
+	return 0
+}
+
+func (x *Trip) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
 	}
 	return ""
 }
@@ -277,12 +309,19 @@ var File_api_trip_proto protoreflect.FileDescriptor
 
 const file_api_trip_proto_rawDesc = "" +
 	"\n" +
-	"\x0eapi/trip.proto\x12\x04trip\"f\n" +
+	"\x0eapi/trip.proto\x12\x04trip\"\xe7\x01\n" +
 	"\x04Trip\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tdriver_id\x18\x02 \x01(\tR\bdriverId\x12\x19\n" +
 	"\brider_id\x18\x03 \x01(\tR\ariderId\x12\x16\n" +
-	"\x06status\x18\x04 \x01(\tR\x06status\" \n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12\x1d\n" +
+	"\n" +
+	"station_id\x18\x05 \x01(\tR\tstationId\x12 \n" +
+	"\vdestination\x18\x06 \x01(\tR\vdestination\x12\x1f\n" +
+	"\veta_minutes\x18\a \x01(\x05R\n" +
+	"etaMinutes\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\b \x01(\tR\tcreatedAt\" \n" +
 	"\x0eGetTripRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"1\n" +
 	"\x0fGetTripResponse\x12\x1e\n" +

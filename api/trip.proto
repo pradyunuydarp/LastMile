@@ -9,6 +9,10 @@ message Trip {
   string driver_id = 2;
   string rider_id = 3;
   string status = 4; // e.g., "pending", "accepted", "in_progress", "completed", "cancelled"
+  string station_id = 5;
+  string destination = 6;
+  int32 eta_minutes = 7;
+  string created_at = 8; // ISO timestamp
 }
 
 message GetTripRequest {

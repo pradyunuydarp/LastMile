@@ -87,6 +87,7 @@ type Route struct {
 	DriverId         string                 `protobuf:"bytes,2,opt,name=driver_id,json=driverId,proto3" json:"driver_id,omitempty"`
 	TargetStationIds []string               `protobuf:"bytes,3,rep,name=target_station_ids,json=targetStationIds,proto3" json:"target_station_ids,omitempty"`
 	AvailableSeats   int32                  `protobuf:"varint,4,opt,name=available_seats,json=availableSeats,proto3" json:"available_seats,omitempty"`
+	Destination      string                 `protobuf:"bytes,5,opt,name=destination,proto3" json:"destination,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -147,6 +148,13 @@ func (x *Route) GetAvailableSeats() int32 {
 		return x.AvailableSeats
 	}
 	return 0
+}
+
+func (x *Route) GetDestination() string {
+	if x != nil {
+		return x.Destination
+	}
+	return ""
 }
 
 type RegisterDriverRequest struct {
@@ -325,6 +333,94 @@ func (x *RegisterRouteResponse) GetId() string {
 	return ""
 }
 
+type ListDriversRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDriversRequest) Reset() {
+	*x = ListDriversRequest{}
+	mi := &file_api_driver_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDriversRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDriversRequest) ProtoMessage() {}
+
+func (x *ListDriversRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_driver_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDriversRequest.ProtoReflect.Descriptor instead.
+func (*ListDriversRequest) Descriptor() ([]byte, []int) {
+	return file_api_driver_proto_rawDescGZIP(), []int{6}
+}
+
+type ListDriversResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Drivers       []*Driver              `protobuf:"bytes,1,rep,name=drivers,proto3" json:"drivers,omitempty"`
+	Routes        []*Route               `protobuf:"bytes,2,rep,name=routes,proto3" json:"routes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDriversResponse) Reset() {
+	*x = ListDriversResponse{}
+	mi := &file_api_driver_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDriversResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDriversResponse) ProtoMessage() {}
+
+func (x *ListDriversResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_driver_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDriversResponse.ProtoReflect.Descriptor instead.
+func (*ListDriversResponse) Descriptor() ([]byte, []int) {
+	return file_api_driver_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ListDriversResponse) GetDrivers() []*Driver {
+	if x != nil {
+		return x.Drivers
+	}
+	return nil
+}
+
+func (x *ListDriversResponse) GetRoutes() []*Route {
+	if x != nil {
+		return x.Routes
+	}
+	return nil
+}
+
 var File_api_driver_proto protoreflect.FileDescriptor
 
 const file_api_driver_proto_rawDesc = "" +
@@ -334,12 +430,13 @@ const file_api_driver_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
 	"\vcar_details\x18\x03 \x01(\tR\n" +
-	"carDetails\"\x8b\x01\n" +
+	"carDetails\"\xad\x01\n" +
 	"\x05Route\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tdriver_id\x18\x02 \x01(\tR\bdriverId\x12,\n" +
 	"\x12target_station_ids\x18\x03 \x03(\tR\x10targetStationIds\x12'\n" +
-	"\x0favailable_seats\x18\x04 \x01(\x05R\x0eavailableSeats\"?\n" +
+	"\x0favailable_seats\x18\x04 \x01(\x05R\x0eavailableSeats\x12 \n" +
+	"\vdestination\x18\x05 \x01(\tR\vdestination\"?\n" +
 	"\x15RegisterDriverRequest\x12&\n" +
 	"\x06driver\x18\x01 \x01(\v2\x0e.driver.DriverR\x06driver\"(\n" +
 	"\x16RegisterDriverResponse\x12\x0e\n" +
@@ -347,10 +444,15 @@ const file_api_driver_proto_rawDesc = "" +
 	"\x14RegisterRouteRequest\x12#\n" +
 	"\x05route\x18\x01 \x01(\v2\r.driver.RouteR\x05route\"'\n" +
 	"\x15RegisterRouteResponse\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id2\xae\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x14\n" +
+	"\x12ListDriversRequest\"f\n" +
+	"\x13ListDriversResponse\x12(\n" +
+	"\adrivers\x18\x01 \x03(\v2\x0e.driver.DriverR\adrivers\x12%\n" +
+	"\x06routes\x18\x02 \x03(\v2\r.driver.RouteR\x06routes2\xf6\x01\n" +
 	"\rDriverService\x12O\n" +
 	"\x0eRegisterDriver\x12\x1d.driver.RegisterDriverRequest\x1a\x1e.driver.RegisterDriverResponse\x12L\n" +
-	"\rRegisterRoute\x12\x1c.driver.RegisterRouteRequest\x1a\x1d.driver.RegisterRouteResponseB\x18Z\x16lastmile/gen/go/driverb\x06proto3"
+	"\rRegisterRoute\x12\x1c.driver.RegisterRouteRequest\x1a\x1d.driver.RegisterRouteResponse\x12F\n" +
+	"\vListDrivers\x12\x1a.driver.ListDriversRequest\x1a\x1b.driver.ListDriversResponseB\x18Z\x16lastmile/gen/go/driverb\x06proto3"
 
 var (
 	file_api_driver_proto_rawDescOnce sync.Once
@@ -364,7 +466,7 @@ func file_api_driver_proto_rawDescGZIP() []byte {
 	return file_api_driver_proto_rawDescData
 }
 
-var file_api_driver_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_api_driver_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_api_driver_proto_goTypes = []any{
 	(*Driver)(nil),                 // 0: driver.Driver
 	(*Route)(nil),                  // 1: driver.Route
@@ -372,19 +474,25 @@ var file_api_driver_proto_goTypes = []any{
 	(*RegisterDriverResponse)(nil), // 3: driver.RegisterDriverResponse
 	(*RegisterRouteRequest)(nil),   // 4: driver.RegisterRouteRequest
 	(*RegisterRouteResponse)(nil),  // 5: driver.RegisterRouteResponse
+	(*ListDriversRequest)(nil),     // 6: driver.ListDriversRequest
+	(*ListDriversResponse)(nil),    // 7: driver.ListDriversResponse
 }
 var file_api_driver_proto_depIdxs = []int32{
 	0, // 0: driver.RegisterDriverRequest.driver:type_name -> driver.Driver
 	1, // 1: driver.RegisterRouteRequest.route:type_name -> driver.Route
-	2, // 2: driver.DriverService.RegisterDriver:input_type -> driver.RegisterDriverRequest
-	4, // 3: driver.DriverService.RegisterRoute:input_type -> driver.RegisterRouteRequest
-	3, // 4: driver.DriverService.RegisterDriver:output_type -> driver.RegisterDriverResponse
-	5, // 5: driver.DriverService.RegisterRoute:output_type -> driver.RegisterRouteResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0, // 2: driver.ListDriversResponse.drivers:type_name -> driver.Driver
+	1, // 3: driver.ListDriversResponse.routes:type_name -> driver.Route
+	2, // 4: driver.DriverService.RegisterDriver:input_type -> driver.RegisterDriverRequest
+	4, // 5: driver.DriverService.RegisterRoute:input_type -> driver.RegisterRouteRequest
+	6, // 6: driver.DriverService.ListDrivers:input_type -> driver.ListDriversRequest
+	3, // 7: driver.DriverService.RegisterDriver:output_type -> driver.RegisterDriverResponse
+	5, // 8: driver.DriverService.RegisterRoute:output_type -> driver.RegisterRouteResponse
+	7, // 9: driver.DriverService.ListDrivers:output_type -> driver.ListDriversResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_api_driver_proto_init() }
@@ -398,7 +506,7 @@ func file_api_driver_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_driver_proto_rawDesc), len(file_api_driver_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

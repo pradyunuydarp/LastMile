@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: station
-        image: lastmile/station:latest
+        image: pradyunuydarp/lastmile-station:latest
         ports:
         - containerPort: 50051
 

@@ -18,6 +18,26 @@ message UpdateLocationResponse {
     bool success = 1;
 }
 
+message GetDriverLocationsRequest {
+    repeated string driver_ids = 1;
+}
+
+message GetDriverLocationsResponse {
+    repeated Location locations = 1;
+}
+
 service LocationService {
-  rpc UpdateLocation(stream UpdateLocationRequest) returns (UpdateLocationResponse);
+    rpc UpdateLocation(stream UpdateLocationRequest) returns (UpdateLocationResponse);
+    rpc SubscribeLocationUpdates(SubscribeLocationRequest) returns (stream LocationUpdate);
+    rpc GetDriverLocations(GetDriverLocationsRequest) returns (GetDriverLocationsResponse);
+}
+
+message SubscribeLocationRequest {
+    string driver_id = 1;
+}
+
+message LocationUpdate {
+    string driver_id = 1;
+    double latitude = 2;
+    double longitude = 3;
 }
