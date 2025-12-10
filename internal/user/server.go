@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	supa "github.com/nedpals/supabase-go"
 	"google.golang.org/grpc/codes"
@@ -135,6 +136,20 @@ func (s *Server) SignIn(ctx context.Context, req *pb.SignInRequest) (*pb.SignInR
 		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
 	}
 
+	// Look at auth metadata while we attempt to hydrate richer profile data.
+	var metaRole string
+	var metaName string
+	if authDetails.User.UserMetadata != nil {
+		if value, ok := authDetails.User.UserMetadata["role"].(string); ok {
+			metaRole = strings.ToLower(strings.TrimSpace(value))
+		}
+		if value, ok := authDetails.User.UserMetadata["full_name"].(string); ok && value != "" {
+			metaName = value
+		} else if value, ok := authDetails.User.UserMetadata["name"].(string); ok && value != "" {
+			metaName = value
+		}
+	}
+
 	// 2. Fetch profile to get role and name
 	var results []struct {
 		FullName string `json:"full_name"`
@@ -142,13 +157,31 @@ func (s *Server) SignIn(ctx context.Context, req *pb.SignInRequest) (*pb.SignInR
 	}
 	err = s.client.DB.From("profiles").Select("full_name, role").Eq("id", authDetails.User.ID).Execute(&results)
 
-	name := ""
-	role := pb.UserRole_USER_ROLE_RIDER
-	if err == nil && len(results) > 0 {
-		name = results[0].FullName
-		if results[0].Role == "driver" {
-			role = pb.UserRole_USER_ROLE_DRIVER
+	name := metaName
+	if name == "" && authDetails.User.Email != "" {
+		name = authDetails.User.Email
+		if local, _, ok := strings.Cut(authDetails.User.Email, "@"); ok && local != "" {
+			name = local
 		}
+	}
+
+	role := pb.UserRole_USER_ROLE_RIDER
+	if metaRole == "driver" {
+		role = pb.UserRole_USER_ROLE_DRIVER
+	}
+
+	if err == nil && len(results) > 0 {
+		if results[0].FullName != "" {
+			name = results[0].FullName
+		}
+		if strings.EqualFold(results[0].Role, "driver") {
+			role = pb.UserRole_USER_ROLE_DRIVER
+		} else if strings.EqualFold(results[0].Role, "rider") {
+			role = pb.UserRole_USER_ROLE_RIDER
+		}
+	} else if err != nil {
+		// Do not fail sign-in when profile lookup has transient issues, but surface the error for observability.
+		s.logger.Warn("profiles lookup during signin failed", "err", err)
 	}
 
 	return &pb.SignInResponse{

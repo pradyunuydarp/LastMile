@@ -91,7 +91,8 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
 
         const client = io(baseGatewayUrl, {
             path: '/socket.io/',
-            transports: ['websocket'],
+            transports: ['polling'], // force polling first to avoid ngrok websocket quirks
+            upgrade: false,
             query: isNgrok ? { 'ngrok-skip-browser-warning': 'true' } : undefined,
         });
         setSocket(client);

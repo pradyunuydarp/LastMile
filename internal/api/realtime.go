@@ -189,11 +189,18 @@ func (h *RealtimeHub) registerHandlers() {
 	})
 
 	h.server.OnDisconnect("/", func(conn socketio.Conn, reason string) {
+		if conn == nil {
+			return
+		}
 		h.removeConn(conn)
 		h.logger.Info("socket disconnected", "sid", conn.ID(), "reason", reason)
 	})
 
 	h.server.OnError("/", func(conn socketio.Conn, err error) {
+		if conn == nil {
+			h.logger.Warn("socket error (no conn)", "err", err)
+			return
+		}
 		h.logger.Warn("socket error", "sid", conn.ID(), "err", err)
 	})
 }

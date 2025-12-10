@@ -90,7 +90,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const client = io(baseUrl, {
       path: '/socket.io/',
-      transports: ['websocket'],
+      transports: ['polling'], // force polling first; websocket upgrade disabled
+      upgrade: false,
       query: isNgrok ? { 'ngrok-skip-browser-warning': 'true' } : undefined,
     });
     setSocket(client);
