@@ -9,6 +9,10 @@ import (
 	"time"
 
 	socketio "github.com/googollee/go-socket.io"
+	"github.com/googollee/go-socket.io/engineio"
+	"github.com/googollee/go-socket.io/engineio/transport"
+	"github.com/googollee/go-socket.io/engineio/transport/polling"
+	"github.com/googollee/go-socket.io/engineio/transport/websocket"
 )
 
 type RealtimeHub struct {
@@ -110,7 +114,34 @@ func NewRealtimeHub(logger *slog.Logger) *RealtimeHub {
 		l = slog.Default()
 	}
 
-	server := socketio.NewServer(nil)
+	server := socketio.NewServer(&engineio.Options{
+		PingTimeout:  60 * time.Second,
+		PingInterval: 25 * time.Second,
+		Transports: []transport.Transport{
+			&websocket.Transport{
+				CheckOrigin: func(r *http.Request) bool {
+					return true
+				},
+			},
+			&polling.Transport{
+				CheckOrigin: func(r *http.Request) bool {
+					return true
+				},
+			},
+		},
+		RequestChecker: func(r *http.Request) (http.Header, error) {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				origin = "*"
+			}
+			h := http.Header{}
+			h.Set("Access-Control-Allow-Origin", origin)
+			h.Set("Access-Control-Allow-Credentials", "true")
+			h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			return h, nil
+		},
+	})
+
 	hub := &RealtimeHub{
 		server:           server,
 		logger:           l.With("component", "realtime"),
@@ -215,6 +246,13 @@ func (h *RealtimeHub) registerDriver(conn socketio.Conn, payload sessionInit) {
 
 	h.mu.Lock()
 	h.drivers[payload.UserID] = session
+
+	// Re-join active rooms
+	for _, room := range h.rooms {
+		if room.driverID == payload.UserID && room.status != "completed" {
+			conn.Join(roomSocket(room.id))
+		}
+	}
 	h.mu.Unlock()
 
 	conn.Emit("session:ack", map[string]string{
@@ -235,6 +273,13 @@ func (h *RealtimeHub) registerRider(conn socketio.Conn, payload sessionInit) {
 
 	h.mu.Lock()
 	h.riders[payload.UserID] = session
+
+	// Re-join active rooms
+	for _, room := range h.rooms {
+		if room.riderID == payload.UserID && room.status != "completed" {
+			conn.Join(roomSocket(room.id))
+		}
+	}
 	h.mu.Unlock()
 
 	conn.Emit("session:ack", map[string]string{
@@ -489,7 +534,7 @@ func (h *RealtimeHub) PickupArrived(driverID string, pickupID string) {
 		if room.driverID != driverID || room.pickup == nil || room.pickup.ID != pickupID {
 			continue
 		}
-		if room.status == "awaiting_pickup" {
+		if room.status == "awaiting_pickup" || room.status == "pending" {
 			room.status = "in_progress"
 			h.server.BroadcastToRoom("/", roomSocket(room.id), "trip:status", tripStatusPayload{
 				TripID:     room.id,
@@ -539,6 +584,14 @@ func (h *RealtimeHub) notifyRiderStatus(riderID string, payload tripStatusPayloa
 
 func (h *RealtimeHub) emitToDriver(driverID, event string, payload any) {
 	session := h.driverSession(driverID)
+	if session == nil {
+		return
+	}
+	session.conn.Emit(event, payload)
+}
+
+func (h *RealtimeHub) emitToRider(riderID, event string, payload any) {
+	session := h.riderSession(riderID)
 	if session == nil {
 		return
 	}
@@ -717,6 +770,7 @@ func (h *RealtimeHub) CreateRoomForTrip(trip Trip, pickup *PickupPoint, station 
 	if rider != nil {
 		h.joinRiderRoom(rider.ID, trip.ID)
 		h.notifyRiderStatus(rider.ID, payload)
+		h.emitToRider(rider.ID, "trip:room-created", payload)
 	}
 	h.emitToDriver(trip.DriverID, "trip:room-created", payload)
 }

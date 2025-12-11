@@ -1,0 +1,81 @@
+@startuml load_balancing
+
+skinparam backgroundColor #FEFEFE
+skinparam sequenceMessageAlign center
+
+title gRPC Client-Side Load Balancing
+
+box "Client (LoadGen Pod)" #LightBlue
+    participant "gRPC Client\n50 workers" as client
+    participant "Round-Robin\nResolver" as resolver
+end box
+
+box "Kubernetes DNS" #LightGreen
+    participant "matching.lastmile\n.svc.cluster.local" as dns
+end box
+
+box "Matching Service (Headless)" #LightYellow
+    participant "Pod 1\n10.244.0.10" as pod1
+    participant "Pod 2\n10.244.0.11" as pod2
+    participant "Pod 3\n10.244.0.12" as pod3
+    participant "Pod N\n10.244.0.1N" as podN
+end box
+
+== Connection Establishment ==
+
+client -> resolver : Dial(matching.lastmile...)
+activate resolver
+resolver -> dns : DNS Query
+activate dns
+dns --> resolver : [10.244.0.10, 10.244.0.11,\n10.244.0.12, ..., 10.244.0.1N]
+deactivate dns
+
+resolver -> pod1 : Open HTTP/2 Connection
+activate pod1
+resolver -> pod2 : Open HTTP/2 Connection
+activate pod2
+resolver -> pod3 : Open HTTP/2 Connection
+activate pod3
+resolver -> podN : Open HTTP/2 Connection
+activate podN
+
+resolver --> client : Connection Pool Ready
+deactivate resolver
+
+== Request Distribution ==
+
+client -> resolver : Match(request 1)
+activate resolver
+resolver -> pod1 : Match RPC
+pod1 --> resolver : Response
+resolver --> client : Result
+deactivate resolver
+
+client -> resolver : Match(request 2)
+activate resolver
+resolver -> pod2 : Match RPC
+pod2 --> resolver : Response
+resolver --> client : Result
+deactivate resolver
+
+client -> resolver : Match(request 3)
+activate resolver
+resolver -> pod3 : Match RPC
+pod3 --> resolver : Response
+resolver --> client : Result
+deactivate resolver
+
+client -> resolver : Match(request 4)
+activate resolver
+resolver -> pod1 : Match RPC (round-robin)
+pod1 --> resolver : Response
+resolver --> client : Result
+deactivate resolver
+
+note over client, podN
+  Load distributed evenly across all pods
+  Each pod receives ~1/N of total requests
+  CPU utilization balanced at ~60% per pod
+end note
+
+@enduml

@@ -104,20 +104,17 @@ func main() {
 	httpMux.HandleFunc("/auth/signin", gw.SignInHandler)
 	httpMux.HandleFunc("/auth/forgot-password", gw.ForgotPasswordHandler)
 	httpMux.HandleFunc("/user/profile", gw.GetUserHandler)
+	httpMux.HandleFunc("/trips/pickup", gw.TripPickupHandler)
+	httpMux.HandleFunc("/trips/dropoff", gw.TripDropoffHandler)
+	httpMux.HandleFunc("/trips/simulate", gw.SimulateTripHandler)
 
 	restHandler := withCORS(requestLogger(logger, httpMux))
 	socketHandler := hub.Handler()
-
 	httpServer := &http.Server{
 		Addr: httpAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/socket.io/") {
-				setSocketCORS(w)
-				if r.Method == http.MethodOptions {
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-				socketHandler.ServeHTTP(&socketResponseWriter{ResponseWriter: w}, r)
+				socketHandler.ServeHTTP(w, r)
 				return
 			}
 			restHandler.ServeHTTP(w, r)

@@ -14,11 +14,11 @@ type DriverOffer = {
 };
 
 type ApprovalRequest = {
-	tripId: string;
-	driverId: string;
-	driverName?: string;
-	pickup?: PickupPoint;
-	station?: Station;
+  tripId: string;
+  driverId: string;
+  driverName?: string;
+  pickup?: PickupPoint;
+  station?: Station;
 };
 
 export type TripRoom = {
@@ -90,8 +90,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const client = io(baseUrl, {
       path: '/socket.io/',
-      transports: ['polling'], // force polling first; websocket upgrade disabled
-      upgrade: false,
+      transports: ['websocket', 'polling'],
+      upgrade: true,
       query: isNgrok ? { 'ngrok-skip-browser-warning': 'true' } : undefined,
     });
     setSocket(client);

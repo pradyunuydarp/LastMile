@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import io from 'socket.io-client';
 import type { DriverRequestsResponse, PickupPoint, Station, Trip } from '../lib/types';
 import { useAuth } from './AuthContext';
 
@@ -50,6 +50,7 @@ export type RiderStatus = {
 };
 
 type RealtimeContextValue = {
+    socket: any | null;
     ready: boolean;
     offers: DriverOffer[];
     queueSummary: DriverRequestsResponse | null;
@@ -68,7 +69,7 @@ const isNgrok = baseGatewayUrl.includes('ngrok');
 
 export const RealtimeProvider = ({ children }: { children: React.ReactNode }) => {
     const { user, role } = useAuth();
-    const [socket, setSocket] = useState<Socket | null>(null);
+    const [socket, setSocket] = useState<any | null>(null);
     const [ready, setReady] = useState(false);
     const [queueSummary, setQueueSummary] = useState<DriverRequestsResponse | null>(null);
     const offersRef = useRef<Record<string, DriverOffer>>({});
@@ -91,8 +92,8 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
 
         const client = io(baseGatewayUrl, {
             path: '/socket.io/',
-            transports: ['polling'], // force polling first to avoid ngrok websocket quirks
-            upgrade: false,
+            transports: ['websocket', 'polling'],
+            upgrade: true,
             query: isNgrok ? { 'ngrok-skip-browser-warning': 'true' } : undefined,
         });
         setSocket(client);
@@ -281,11 +282,13 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
         }
     }, [approvalRequest, riderStatus]);
 
+
     const offers = useMemo(() => Object.values(offersRef.current), [offersVersion, ready]);
     const rooms = useMemo(() => Object.values(roomsRef.current), [roomsVersion, ready]);
 
     const value = useMemo<RealtimeContextValue>(
         () => ({
+            socket,
             ready,
             offers,
             queueSummary,
@@ -296,7 +299,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
             completeTrip,
             respondToApproval,
         }),
-        [ready, offers, queueSummary, rooms, riderStatus, approvalRequest, respondToOffer, completeTrip, respondToApproval],
+        [socket, ready, offers, queueSummary, rooms, riderStatus, approvalRequest, respondToOffer, completeTrip, respondToApproval],
     );
 
     return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

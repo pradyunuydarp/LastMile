@@ -1,0 +1,83 @@
+@startuml deployment_architecture
+!include <kubernetes/k8s-sprites-unlabeled-25pct>
+
+skinparam backgroundColor #FEFEFE
+
+title Kubernetes Deployment Architecture
+
+cloud "Kubernetes Cluster (Minikube)" {
+    
+    package "Namespace: lastmile" {
+        
+        package "Deployments" {
+            component "<$pod>\nUser\n1 replica" as user_pod
+            component "<$pod>\nDriver\n1 replica" as driver_pod
+            component "<$pod>\nRider\n1 replica" as rider_pod
+            component "<$pod>\nLocation\n1 replica" as location_pod
+            component "<$pod>\nMatching\n1-8 replicas\nHPA enabled" as matching_pod
+            component "<$pod>\nTrip\n1 replica" as trip_pod
+            component "<$pod>\nNotification\n1 replica" as notification_pod
+            component "<$pod>\nStation\n1 replica" as station_pod
+            component "<$pod>\nGateway\n1 replica" as gateway_pod
+            component "<$pod>\nLoadGen\n1 replica\n50 workers" as loadgen_pod
+        }
+        
+        package "Services" {
+            component "<$svc>\nuser:50052" as user_svc
+            component "<$svc>\ndriver:50051" as driver_svc
+            component "<$svc>\nrider:50055" as rider_svc
+            component "<$svc>\nlocation:50054" as location_svc
+            component "<$svc>\nmatching:50053\nHeadless" as matching_svc
+            component "<$svc>\ntrip:50057" as trip_svc
+            component "<$svc>\nnotification:50058" as notification_svc
+            component "<$svc>\nstation:50056" as station_svc
+            component "<$svc>\ngateway:80" as gateway_svc
+        }
+        
+        component "<$hpa>\nMatching HPA\nCPU: 60%\nMin: 1, Max: 8" as hpa
+    }
+}
+
+cloud "External Services" {
+    database "Supabase" as supabase
+}
+
+actor "Mobile/Web Client" as client
+
+' Service to Pod connections
+user_svc --> user_pod
+driver_svc --> driver_pod
+rider_svc --> rider_pod
+location_svc --> location_pod
+matching_svc --> matching_pod
+trip_svc --> trip_pod
+notification_svc --> notification_pod
+station_svc --> station_pod
+gateway_svc --> gateway_pod
+
+' HPA controls matching
+hpa --> matching_pod : scales
+
+' Load balancing
+loadgen_pod --> matching_svc : round-robin\nload balancing
+location_pod --> matching_svc : round-robin\nload balancing
+
+' Gateway as entry point
+client --> gateway_svc : HTTPS:80\nWebSocket
+
+' User service external dependency
+user_pod --> supabase : PostgreSQL\nAuth API
+
+note right of matching_svc
+  clusterIP: None
+  Enables client-side
+  load balancing
+end note
+
+note bottom of hpa
+  Metrics: CPU utilization
+  Scale up when > 60%
+  Scale down when < 60%
+end note
+
+@enduml

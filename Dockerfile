@@ -12,15 +12,9 @@ RUN go mod download
 COPY . .
 
 # Build all the services
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/station ./cmd/station
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/driver ./cmd/driver
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/rider ./cmd/rider
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/location ./cmd/location
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/matching ./cmd/matching
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/trip ./cmd/trip
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/notification ./cmd/notification
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/user ./cmd/user
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/gateway ./cmd/gateway
+ARG SERVICE
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/${SERVICE} ./cmd/${SERVICE}
+
 
 # Stage 2: Create the final minimal image
 FROM gcr.io/distroless/static-debian11

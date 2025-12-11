@@ -1,0 +1,79 @@
+@startuml system_architecture
+!define RECTANGLE class
+
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+
+title LastMile System Architecture
+
+package "Client Layer" {
+    [Mobile App\nReact Native] as Mobile
+    [Web App\nReact] as Web
+}
+
+package "API Gateway Layer" {
+    [API Gateway\nHTTP + gRPC + WebSocket] as Gateway
+}
+
+package "Microservices Layer" {
+    package "Core Services" {
+        [User Service\n:50052] as User
+        [Driver Service\n:50051] as Driver
+        [Rider Service\n:50055] as Rider
+    }
+    
+    package "Location & Matching" {
+        [Location Service\n:50054] as Location
+        [Matching Service\n:50053\nHPA: 1-8 replicas] as Matching
+    }
+    
+    package "Trip & Notification" {
+        [Trip Service\n:50057] as Trip
+        [Notification Service\n:50058] as Notification
+        [Station Service\n:50056] as Station
+    }
+}
+
+package "Data Layer" {
+    database "Supabase\nPostgreSQL + Auth" as Supabase
+    database "In-Memory\nStores" as InMemory
+}
+
+' Client to Gateway
+Mobile --> Gateway : HTTPS/WebSocket
+Web --> Gateway : HTTPS/WebSocket
+
+' Gateway to Services
+Gateway --> User : gRPC
+Gateway --> Driver : gRPC
+Gateway --> Rider : gRPC
+Gateway --> Location : gRPC
+Gateway --> Trip : gRPC
+
+' Inter-service Communication
+Location --> Matching : gRPC\n(proximity trigger)
+Matching --> Driver : gRPC
+Matching --> Rider : gRPC
+Matching --> Notification : gRPC
+
+' Data Layer
+User --> Supabase : Auth & Profiles
+Driver --> InMemory : Routes & Status
+Rider --> InMemory : Requests
+Location --> InMemory : GPS Updates
+Trip --> InMemory : Trip State
+Station --> InMemory : Metadata
+
+note right of Matching
+  Horizontally Scaled
+  Client-side Load Balancing
+  Round-robin Policy
+end note
+
+note left of Gateway
+  HTTP → gRPC Translation
+  WebSocket Hub
+  Real-time Updates
+end note
+
+@enduml

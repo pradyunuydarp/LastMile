@@ -81,39 +81,19 @@ func defaultStations() []Station {
 	}
 }
 
-// defaultPickupPoints exposes 30 curated pickup clusters around south Bengaluru metro stops.
+// defaultPickupPoints returns the metro stations themselves as the only valid pickup points.
 func defaultPickupPoints() []PickupPoint {
-	return []PickupPoint{
-		{ID: "pickup-wipro-gate", Name: "Wipro Gate", StationID: "station-ecity", StationName: "Electronic City", Latitude: 12.8467, Longitude: 77.6624},
-		{ID: "pickup-infosys-gate", Name: "Infosys Gate", StationID: "station-ecity", StationName: "Electronic City", Latitude: 12.8459, Longitude: 77.6666},
-		{ID: "pickup-velankani", Name: "Velankani Tech Park", StationID: "station-ecity", StationName: "Electronic City", Latitude: 12.8449, Longitude: 77.6615},
-		{ID: "pickup-neeladri", Name: "Neeladri Road", StationID: "station-ecity", StationName: "Electronic City", Latitude: 12.8442, Longitude: 77.6574},
-		{ID: "pickup-doddathogur", Name: "Doddathogur Cross", StationID: "station-ecity", StationName: "Electronic City", Latitude: 12.8365, Longitude: 77.6642},
-		{ID: "pickup-singasandra", Name: "Singasandra", StationID: "station-ecity", StationName: "Electronic City", Latitude: 12.884, Longitude: 77.654},
-		{ID: "pickup-kudlu-gate", Name: "Kudlu Gate", StationID: "station-hsr", StationName: "HSR Layout", Latitude: 12.8936, Longitude: 77.6513},
-		{ID: "pickup-hosa-road", Name: "Hosa Road Junction", StationID: "station-konappana", StationName: "Konappana Agrahara", Latitude: 12.8721, Longitude: 77.6647},
-		{ID: "pickup-konappana", Name: "Konappana Bus Stop", StationID: "station-konappana", StationName: "Konappana Agrahara", Latitude: 12.8513, Longitude: 77.6541},
-		{ID: "pickup-siemens", Name: "Siemens Campus", StationID: "station-konappana", StationName: "Konappana Agrahara", Latitude: 12.8553, Longitude: 77.6515},
-		{ID: "pickup-pes-it", Name: "PES IT Junction", StationID: "station-konappana", StationName: "Konappana Agrahara", Latitude: 12.8581, Longitude: 77.6493},
-		{ID: "pickup-huskur", Name: "Huskur Junction", StationID: "station-huskur", StationName: "Huskur Road", Latitude: 12.8188, Longitude: 77.6924},
-		{ID: "pickup-dmart", Name: "D Mart Huskur", StationID: "station-huskur", StationName: "Huskur Road", Latitude: 12.817, Longitude: 77.6972},
-		{ID: "pickup-ecity-phase2", Name: "Electronic City Phase 2", StationID: "station-huskur", StationName: "Huskur Road", Latitude: 12.8149, Longitude: 77.6968},
-		{ID: "pickup-bommasandra", Name: "Bommasandra Industrial", StationID: "station-bommasandra", StationName: "Bommasandra", Latitude: 12.8019, Longitude: 77.7018},
-		{ID: "pickup-narayana", Name: "Narayana Health City", StationID: "station-bommasandra", StationName: "Bommasandra", Latitude: 12.8008, Longitude: 77.6846},
-		{ID: "pickup-chandapura", Name: "Chandapura Circle", StationID: "station-bommasandra", StationName: "Bommasandra", Latitude: 12.8011, Longitude: 77.7039},
-		{ID: "pickup-attibele", Name: "Attibele Checkpost", StationID: "station-bommasandra", StationName: "Bommasandra", Latitude: 12.7842, Longitude: 77.7721},
-		{ID: "pickup-silkboard", Name: "Silk Board Flyover", StationID: "station-silkboard", StationName: "Central Silk Board", Latitude: 12.916, Longitude: 77.6239},
-		{ID: "pickup-madiwala", Name: "Madiwala Police Station", StationID: "station-silkboard", StationName: "Central Silk Board", Latitude: 12.9188, Longitude: 77.6176},
-		{ID: "pickup-hsr-27th", Name: "HSR 27th Main", StationID: "station-hsr", StationName: "HSR Layout", Latitude: 12.9082, Longitude: 77.6475},
-		{ID: "pickup-hsr-bda", Name: "HSR BDA Complex", StationID: "station-hsr", StationName: "HSR Layout", Latitude: 12.9129, Longitude: 77.6382},
-		{ID: "pickup-agara", Name: "Agara Lake", StationID: "station-hsr", StationName: "HSR Layout", Latitude: 12.9215, Longitude: 77.651},
-		{ID: "pickup-btm2", Name: "BTM 2nd Stage", StationID: "station-btm", StationName: "BTM Layout", Latitude: 12.9169, Longitude: 77.6105},
-		{ID: "pickup-jayadeva", Name: "Jayadeva Hospital", StationID: "station-btm", StationName: "BTM Layout", Latitude: 12.9189, Longitude: 77.5956},
-		{ID: "pickup-forum", Name: "Forum Mall", StationID: "station-koramangala", StationName: "Koramangala", Latitude: 12.9349, Longitude: 77.6113},
-		{ID: "pickup-sonyworld", Name: "Sony World Junction", StationID: "station-koramangala", StationName: "Koramangala", Latitude: 12.9353, Longitude: 77.6393},
-		{ID: "pickup-ejipura", Name: "Ejipura Signal", StationID: "station-koramangala", StationName: "Koramangala", Latitude: 12.9304, Longitude: 77.626},
-		{ID: "pickup-bellandur-gate", Name: "Bellandur Gate", StationID: "station-bellandur", StationName: "Bellandur", Latitude: 12.9378, Longitude: 77.679},
-		{ID: "pickup-iblur", Name: "Iblur Junction", StationID: "station-bellandur", StationName: "Bellandur", Latitude: 12.9248, Longitude: 77.6773},
-		{ID: "pickup-haralur", Name: "Haralur Road", StationID: "station-hsr", StationName: "HSR Layout", Latitude: 12.9004, Longitude: 77.6492},
+	stations := defaultStations()
+	points := make([]PickupPoint, 0, len(stations))
+	for _, s := range stations {
+		points = append(points, PickupPoint{
+			ID:          "pickup-" + s.ID,
+			Name:        s.Name + " Metro Station", // Explicit naming
+			StationID:   s.ID,
+			StationName: s.Name,
+			Latitude:    s.Latitude,
+			Longitude:   s.Longitude,
+		})
 	}
+	return points
 }

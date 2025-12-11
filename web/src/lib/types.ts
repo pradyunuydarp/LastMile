@@ -138,6 +138,7 @@ export type DriverRoutePayload = {
   carDetails: string;
   pickupPointIds: string[];
   seats: number;
+  destination?: string;
 };
 
 export type DriverRouteResponse = {
@@ -147,4 +148,19 @@ export type DriverRouteResponse = {
   seatsAvailable: number;
   targetStations: string[];
   destination: string;
+};
+
+export type TripStatusPayload = {
+  tripId: string;
+  status: string;
+  driverId: string;
+  riderId: string;
+  pickup?: PickupPoint;
+  station?: Station;
+  latitude?: number;
+  longitude?: number;
+  recordedAt: string;
+  description?: string;
+  trip?: Trip;
+  rider?: Rider;
 };

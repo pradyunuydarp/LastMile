@@ -193,6 +193,7 @@ type driverRouteRequest struct {
 	CarDetails     string   `json:"carDetails"`
 	PickupPointIDs []string `json:"pickupPointIds"`
 	Seats          int      `json:"seats"`
+	Destination    string   `json:"destination"`
 }
 
 type driverRouteResponse struct {
@@ -597,7 +598,8 @@ func (g *Gateway) driverRequests(driverID string) (driverRequestsResponse, error
 		}
 	}
 
-	var requests []riderRequestView
+	requests := make([]riderRequestView, 0)
+
 	for i := range g.riders {
 		rider := g.riders[i]
 		if rider.Status == "picked_up" {
@@ -1215,6 +1217,7 @@ func (g *Gateway) DriverAcceptHandler(w http.ResponseWriter, r *http.Request) {
 
 	trip, err := g.createTripForRider(payload.DriverID, stationID, payload.RiderID)
 	if err != nil {
+		g.logger.Warn("accept trip failed", "driverId", payload.DriverID, "riderId", payload.RiderID, "err", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -1534,7 +1537,7 @@ func (g *Gateway) queueRiderApproval(trip Trip) {
 	g.mu.Unlock()
 
 	g.sendPushNotification(trip.RiderID, "Driver ready for pickup", fmt.Sprintf("%s is ready near %s", g.driverDisplayName(trip.DriverID), pickupName(pickupCopy)), map[string]any{
-		"tripId": trip.ID,
+		"tripId":   trip.ID,
 		"driverId": trip.DriverID,
 	})
 
@@ -1911,7 +1914,214 @@ func (g *Gateway) UpdateLocationHandler(w http.ResponseWriter, r *http.Request) 
 	if passed != nil {
 		g.handlePickupCheckpoint(req.DriverID, passed)
 	}
-	g.maybeCompleteTrips(req.DriverID, req.Latitude, req.Longitude)
-
 	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) TripPickupHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	tripID := r.URL.Query().Get("tripId")
+	if tripID == "" {
+		http.Error(w, "tripId required", http.StatusBadRequest)
+		return
+	}
+
+	g.mu.Lock()
+	var targetTrip *Trip
+	for i := range g.trips {
+		if g.trips[i].ID == tripID {
+			targetTrip = &g.trips[i]
+			break
+		}
+	}
+	g.mu.Unlock()
+
+	if targetTrip == nil {
+		http.Error(w, "trip not found", http.StatusNotFound)
+		return
+	}
+
+	if targetTrip.Status == "pending" || targetTrip.Status == "awaiting_pickup" {
+		// Advance to in_progress
+		if g.hub != nil {
+			g.hub.PickupArrived(targetTrip.DriverID, targetTrip.PickupPointID)
+		}
+
+		// Warp Driver to Pickup Location
+		g.mu.Lock()
+		pickup, ok := g.pickupByID(targetTrip.PickupPointID)
+		driverID := targetTrip.DriverID
+		plan, hasPlan := g.driverPlans[driverID]
+		g.mu.Unlock()
+
+		if ok {
+			g.publishDriverLocation(driverID, pickup.Latitude, pickup.Longitude)
+
+			// Resume Simulation from Pickup -> Dropoff (Destination)
+			if hasPlan && plan.Simulated {
+				g.mu.Lock()
+				// Cancel existing sim
+				if plan.simCancel != nil {
+					plan.simCancel()
+				}
+
+				// Setup new sim to Destination
+				destCoords := getDestinationCoords(targetTrip.Destination)
+				if destCoords != nil {
+					simCtx, cancel := context.WithCancel(context.Background())
+					plan.simCancel = cancel
+					// We simulate TO destination.
+					// We treat destination as a single waypoint.
+					waypoints := []PickupPoint{*destCoords}
+					g.mu.Unlock()
+					go g.runSimulatedTrip(simCtx, driverID, waypoints)
+				} else {
+					g.mu.Unlock()
+					// Fallback: If no coords, maybe just stop sim?
+					// Or try to simulate to target stations?
+					// For now, stop sim is safer than random movement.
+				}
+			}
+		}
+	}
+
+	// Also update local state
+	g.mu.Lock()
+	targetTrip.Status = "in_progress"
+	targetTrip.CreatedAt = time.Now().UTC()
+	g.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "picked_up"})
+}
+
+func (g *Gateway) TripDropoffHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	tripID := r.URL.Query().Get("tripId")
+	if tripID == "" {
+		http.Error(w, "tripId required", http.StatusBadRequest)
+		return
+	}
+
+	completed, err := g.completeTrip(tripID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if g.hub != nil {
+		g.hub.CompleteTrip(tripID, "manual_dropoff")
+	}
+
+	writeJSON(w, http.StatusOK, completed)
+}
+
+func (g *Gateway) SimulateTripHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	tripID := r.URL.Query().Get("tripId")
+	if tripID == "" {
+		http.Error(w, "tripId required", http.StatusBadRequest)
+		return
+	}
+
+	g.mu.Lock()
+	var targetTrip *Trip
+	for i := range g.trips {
+		if g.trips[i].ID == tripID {
+			targetTrip = &g.trips[i]
+			break
+		}
+	}
+	if targetTrip == nil {
+		g.mu.Unlock()
+		http.Error(w, "trip not found", http.StatusNotFound)
+		return
+	}
+	driverID := targetTrip.DriverID
+	plan, ok := g.driverPlans[driverID]
+	if !ok {
+		g.mu.Unlock()
+		http.Error(w, "driver plan not found", http.StatusNotFound)
+		return
+	}
+	if plan.simCancel != nil {
+		g.mu.Unlock()
+		// Already simulating, nothing to start
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Start simulation
+	pickups := g.pickupPointsForIDs(plan.PickupIDs)
+	if plan.CurrentIndex > 0 && plan.CurrentIndex < len(pickups) {
+		pickups = pickups[plan.CurrentIndex:]
+	} else if plan.CurrentIndex >= len(pickups) {
+		// Already finished route?
+		// Maybe just target stations?
+		// But for now, let's restart if finished or do nothing?
+		// User wants to simulate current trip segment.
+		// If index is end, maybe we just complete?
+		// Let's assume restart if finished, or just nothing.
+		if plan.CurrentIndex >= len(plan.PickupIDs) {
+			pickups = []PickupPoint{} // Should trigger station logic?
+		}
+	}
+
+	simCtx, cancel := context.WithCancel(context.Background())
+	plan.simCancel = cancel
+	plan.Simulated = true
+	g.mu.Unlock()
+
+	go g.runSimulatedTrip(simCtx, driverID, pickups)
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "simulation_started"})
+}
+
+var knownDestinations = map[string]PickupPoint{
+	"Wipro Gate":              {Latitude: 12.8467, Longitude: 77.6624},
+	"Infosys Gate":            {Latitude: 12.8459, Longitude: 77.6666},
+	"Velankani Tech Park":     {Latitude: 12.8449, Longitude: 77.6615},
+	"Neeladri Road":           {Latitude: 12.8442, Longitude: 77.6574},
+	"Doddathogur Cross":       {Latitude: 12.8365, Longitude: 77.6642},
+	"Singasandra":             {Latitude: 12.884, Longitude: 77.654},
+	"Kudlu Gate":              {Latitude: 12.8936, Longitude: 77.6513},
+	"Hosa Road Junction":      {Latitude: 12.8721, Longitude: 77.6647},
+	"Konappana Bus Stop":      {Latitude: 12.8513, Longitude: 77.6541},
+	"Siemens Campus":          {Latitude: 12.8553, Longitude: 77.6515},
+	"PES IT Junction":         {Latitude: 12.8581, Longitude: 77.6493},
+	"Huskur Junction":         {Latitude: 12.8188, Longitude: 77.6924},
+	"D Mart Huskur":           {Latitude: 12.817, Longitude: 77.6972},
+	"Electronic City Phase 2": {Latitude: 12.8149, Longitude: 77.6968},
+	"Bommasandra Industrial":  {Latitude: 12.8019, Longitude: 77.7018},
+	"Narayana Health City":    {Latitude: 12.8008, Longitude: 77.6846},
+	"Chandapura Circle":       {Latitude: 12.8011, Longitude: 77.7039},
+	"Attibele Checkpost":      {Latitude: 12.7842, Longitude: 77.7721},
+	"Silk Board Flyover":      {Latitude: 12.916, Longitude: 77.6239},
+	"Madiwala Police Station": {Latitude: 12.9188, Longitude: 77.6176},
+	"HSR 27th Main":           {Latitude: 12.9082, Longitude: 77.6475},
+	"HSR BDA Complex":         {Latitude: 12.9129, Longitude: 77.6382},
+	"Agara Lake":              {Latitude: 12.9215, Longitude: 77.651},
+	"BTM 2nd Stage":           {Latitude: 12.9169, Longitude: 77.6105},
+	"Jayadeva Hospital":       {Latitude: 12.9189, Longitude: 77.5956},
+	"Forum Mall":              {Latitude: 12.9349, Longitude: 77.6113},
+	"Sony World Junction":     {Latitude: 12.9353, Longitude: 77.6393},
+	"Ejipura Signal":          {Latitude: 12.9304, Longitude: 77.626},
+	"Bellandur Gate":          {Latitude: 12.9378, Longitude: 77.679},
+	"Iblur Junction":          {Latitude: 12.9248, Longitude: 77.6773},
+	"Haralur Road":            {Latitude: 12.9004, Longitude: 77.6492},
+}
+
+func getDestinationCoords(name string) *PickupPoint {
+	if p, ok := knownDestinations[name]; ok {
+		return &p
+	}
+	// Fallback to Electronic City if unknown? Or nil.
+	return nil
 }

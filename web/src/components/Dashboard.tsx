@@ -1,14 +1,16 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { MapPin, Navigation, Users, LogOut, Power, Search } from 'lucide-react';
+import { MapPin, Navigation, Users, LogOut, Power, Search, PlayCircle } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { acceptDriverRequest, bookRide, fetchDriverRequests, fetchPickupPoints, fetchSnapshot, saveDriverRoute, startDriverTrip } from '../lib/backend';
-import type { BookRideResponse, Driver, DriverRequestsResponse, PickupPoint } from '../lib/types';
+import type { BookRideResponse, Driver, DriverRequestsResponse, PickupPoint, TripStatusPayload } from '../lib/types';
+import { DESTINATIONS } from '../lib/destinations';
 import { DriversMap } from './DriversMap';
 import { DriverCard } from './DriverCard';
+import { Room } from './Room';
 import { useRealtime } from '../contexts/RealtimeContext';
 
 // Fix Leaflet default icon issue
@@ -45,7 +47,31 @@ const formatDistance = (meters?: number) => {
 
 export function Dashboard() {
     const { user, signOut, role: authRole } = useAuth();
-    const { ready: realtimeReady, offers, queueSummary, rooms, riderStatus, approvalRequest, respondToOffer, completeTrip, respondToApproval } = useRealtime();
+    const { ready: realtimeReady, socket, offers, queueSummary, rooms, riderStatus, approvalRequest, respondToOffer, completeTrip, respondToApproval } = useRealtime();
+    const [activeRoom, setActiveRoom] = useState<{ id: string; status: TripStatusPayload } | null>(null);
+
+    useEffect(() => {
+        if (!socket) return;
+        const onRoomCreated = (payload: TripStatusPayload) => {
+            setActiveRoom({ id: payload.tripId, status: payload });
+        };
+        socket.on('trip:room-created', onRoomCreated);
+
+        // Also check if we should already be in a room from riderStatus
+        if (riderStatus?.tripId && (riderStatus.status === 'awaiting_pickup' || riderStatus.status === 'in_progress')) {
+            if (!activeRoom || activeRoom.id !== riderStatus.tripId) {
+                // Cast or ensure compatibility. Assuming RiderStatus is compatible enough or we need to map it.
+                // Ideally we should use a proper converter, but for now we trust the shape overlap for key fields.
+                // We need to ensure 'status' field matches TripStatusPayload type if strict.
+                setActiveRoom({ id: riderStatus.tripId, status: riderStatus as any });
+            }
+        }
+
+        return () => {
+            socket.off('trip:room-created', onRoomCreated);
+        };
+    }, [socket, riderStatus]);
+
     const role = user?.user_metadata?.role || authRole || 'rider';
     const isDriver = typeof role === 'string' ? role.toLowerCase() === 'driver' : role === 2;
     const driverTabs = [
@@ -92,6 +118,8 @@ export function Dashboard() {
     const [acceptFeedback, setAcceptFeedback] = useState<string | null>(null);
     const [savingRoute, setSavingRoute] = useState(false);
     const [startingTrip, setStartingTrip] = useState(false);
+    const [simulating, setSimulating] = useState(false);
+    const [selectedDestination, setSelectedDestination] = useState<string | null>(null);
     const watchIdRef = useRef<number | null>(null);
     const selectedPickup = useMemo<PickupPoint | null>(() => pickupPoints.find((point) => point.id === selectedPickupId) ?? null, [pickupPoints, selectedPickupId]);
     const filteredPickupOptions = useMemo<PickupPoint[]>(() => {
@@ -182,15 +210,61 @@ export function Dashboard() {
 
     useEffect(() => {
         // Start tracking for riders immediately to show them on map
+        // For drivers, only track if online and NOT simulating
         if (!isDriver) {
             startLocationTracking();
+        } else if (isOnline && !simulating) {
+            startLocationTracking();
+        } else if (simulating && watchIdRef.current) {
+            // Stop real GPS if simulating
+            navigator.geolocation.clearWatch(watchIdRef.current);
+            watchIdRef.current = null;
         }
+
         return () => {
             if (watchIdRef.current !== null) {
                 navigator.geolocation.clearWatch(watchIdRef.current);
             }
         };
-    }, [isDriver]);
+    }, [isDriver, isOnline, simulating]);
+
+    // Simulation Loop
+    useEffect(() => {
+        if (!simulating || !activeRoom?.status?.station) return;
+        const station = activeRoom.status.station;
+        if (!station.latitude || !station.longitude) return;
+
+        const interval = setInterval(async () => {
+            setLocation((prev) => {
+                if (!prev) return { lat: station.latitude! - 0.01, lng: station.longitude! - 0.01 }; // Start offset
+                const latDiff = station.latitude! - prev.lat;
+                const lngDiff = station.longitude! - prev.lng;
+
+                // Move 10% of distance or min step
+                const step = 0.1;
+                // Simple interpolation
+                const newLat = prev.lat + latDiff * step;
+                const newLng = prev.lng + lngDiff * step;
+
+                // Send update
+                // Send update to backend if driver
+                if (isDriver && user?.id) {
+                    fetch('/api/location/update', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            driverId: user.id,
+                            latitude: newLat,
+                            longitude: newLng,
+                        }),
+                    }).catch(console.warn);
+                }
+                return { lat: newLat, lng: newLng };
+            });
+        }, 5000);
+
+        return () => clearInterval(interval);
+    }, [simulating, activeRoom, isDriver, user?.id]);
 
     useEffect(() => {
         let cancelled = false;
@@ -295,9 +369,9 @@ export function Dashboard() {
         try {
             const response = await bookRide({
                 command: 'book',
-                address: selectedPickup.name,
-                destination: selectedPickup.stationName,
-                pickupPointId: selectedPickup.id,
+                address: selectedPickup.name, // Sending Station Name as Address (Pickup)
+                destination: selectedDestination || 'Nearby Location', // Sending Selected Area
+                pickupPointId: selectedPickup.id, // Station ID as PickupPointID
                 riderId: user?.id ?? undefined,
                 name: riderName,
             });
@@ -328,6 +402,7 @@ export function Dashboard() {
                 carDetails: selfDriver?.carDetails ?? 'Metro Cab',
                 pickupPointIds: routePickupIds,
                 seats: Number.parseInt(routeSeatCount, 10) || 1,
+                destination: selectedDestination || 'unknown', // Send 'unknown' to match any rider destination
             });
             setRouteStatus(`Route saved · ${response.pickupPoints.length} stops, ${response.seatsTotal} seats`);
         } catch (err) {
@@ -353,17 +428,24 @@ export function Dashboard() {
         }
     };
 
-    const handleAcceptRider = async (riderId: string) => {
+    const handleAcceptRider = async (riderId: string, simulateMode = false) => {
         if (!user?.id) {
             setAcceptFeedback('Sign in as a driver to accept riders.');
             return;
         }
         setAcceptFeedback(null);
         setAcceptingRiderId(riderId);
+        if (simulateMode) {
+            setSimulating(true);
+            // Ensure we have a starting location for simulation if none exists
+            if (!location) {
+                setLocation({ lat: 12.83, lng: 77.65 }); // Default somewhere near EC
+            }
+        }
         try {
             const trip = await acceptDriverRequest({ driverId: user.id, riderId });
             const riderLabel = trip.pickup?.name ?? trip.destination ?? riderId;
-            setAcceptFeedback(`Trip confirmed for ${riderLabel}.`);
+            setAcceptFeedback(`Trip confirmed for ${riderLabel}. ${simulateMode ? 'Simulation started.' : 'Go pick them up!'}`);
             try {
                 const [snapshotData, requestData] = await Promise.all([
                     fetchSnapshot(),
@@ -378,6 +460,7 @@ export function Dashboard() {
             }
         } catch (err) {
             setAcceptFeedback((err as Error).message || 'Unable to accept rider');
+            setSimulating(false); // Revert logic if fail
         } finally {
             setAcceptingRiderId(null);
         }
@@ -393,7 +476,7 @@ export function Dashboard() {
         if (first?.station.latitude && first.station.longitude) {
             return [first.station.latitude, first.station.longitude];
         }
-    return [12.8456, 77.66];
+        return [12.8456, 77.66];
     })();
 
     const driverNetworkCard = (
@@ -508,16 +591,29 @@ export function Dashboard() {
                                 </div>
                                 <p className="text-slate-400 text-sm">Station · {req.station.name}</p>
                                 <p className="text-slate-500 text-xs">Distance · {formatDistance(req.distanceMeters)}</p>
-                                <button
-                                    onClick={() => handleAcceptRider(req.id)}
-                                    disabled={acceptingRiderId === req.id}
-                                    className={`mt-3 w-full rounded-lg py-2 text-sm font-semibold transition ${acceptingRiderId === req.id
-                                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                                        : 'bg-emerald-500 text-white hover:bg-emerald-600'
-                                        }`}
-                                >
-                                    {acceptingRiderId === req.id ? 'Confirming…' : 'Accept Rider'}
-                                </button>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => handleAcceptRider(req.id, false)}
+                                        disabled={acceptingRiderId === req.id}
+                                        className={`mt-3 flex-1 rounded-lg py-2 text-sm font-semibold transition ${acceptingRiderId === req.id
+                                            ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                            : 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                            }`}
+                                    >
+                                        {acceptingRiderId === req.id ? 'Confirming…' : 'Accept'}
+                                    </button>
+                                    <button
+                                        onClick={() => handleAcceptRider(req.id, true)}
+                                        disabled={acceptingRiderId === req.id}
+                                        className={`mt-3 flex-none px-4 rounded-lg py-2 text-sm font-semibold transition ${acceptingRiderId === req.id
+                                            ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                                            }`}
+                                        title="Simulate Trip"
+                                    >
+                                        <PlayCircle size={18} />
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -578,36 +674,55 @@ export function Dashboard() {
     const riderBookingCard = (
         <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 space-y-4">
             <div>
-                <h2 className="text-xl font-bold">Need a last-mile drop?</h2>
-                <p className="text-slate-400 text-sm">Pick a pickup cluster near your metro station and we’ll notify available drivers.</p>
+                <h2 className="text-xl font-bold">Book a ride from Metro</h2>
+                <p className="text-slate-400 text-sm">Select your Metro Station and destination.</p>
             </div>
             <form onSubmit={handleBookRide} className="space-y-4">
                 <input
                     value={pickupQuery}
                     onChange={(e) => setPickupQuery(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 px-3 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Search pickup point"
+                    placeholder="Search Metro Station"
                 />
                 <div className="grid grid-cols-2 gap-3">
                     {filteredPickupOptions.map((point: PickupPoint) => (
                         <button
                             key={point.id}
                             type="button"
-                            onClick={() => setSelectedPickupId(point.id)}
+                            onClick={() => {
+                                setSelectedPickupId(point.id);
+                                setSelectedDestination(null); // Reset destination when station changes
+                            }}
                             className={`rounded-lg border px-3 py-2 text-left transition ${selectedPickupId === point.id
                                 ? 'border-emerald-400 bg-emerald-500/10 text-white'
                                 : 'border-slate-700 text-slate-300 hover:border-slate-500'
                                 }`}
                         >
                             <div className="font-semibold">{point.name}</div>
-                            <div className="text-xs text-slate-400">{point.stationName}</div>
                         </button>
                     ))}
                 </div>
                 {selectedPickup ? (
-                    <div className="text-slate-300 text-sm">Drop-off station · {selectedPickup.stationName}</div>
+                    <div>
+                        <label className="text-xs text-slate-400 uppercase font-semibold mb-2 block">Select Destination</label>
+                        {/* Find the Station object matching selectedPickup.stationId to get nearbyAreas */}
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                            {DESTINATIONS.filter(d => d.stationId === selectedPickup.stationId).map((dest) => (
+                                <button
+                                    key={dest.id}
+                                    type="button"
+                                    onClick={() => setSelectedDestination(dest.name)}
+                                    className={`text-xs px-2 py-1.5 rounded border transition ${selectedDestination === dest.name
+                                        ? 'bg-blue-500/20 border-blue-500 text-white'
+                                        : 'border-slate-700 text-slate-400 hover:border-slate-500'}`}
+                                >
+                                    {dest.name}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                 ) : (
-                    <div className="text-slate-500 text-sm">Tap a pickup suggestion above to continue.</div>
+                    <div className="text-slate-500 text-sm">Tap a station above to see destinations.</div>
                 )}
                 <div className="h-60 rounded-xl overflow-hidden border border-slate-700">
                     <MapContainer
@@ -722,14 +837,14 @@ export function Dashboard() {
         <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 space-y-4">
             <div>
                 <h2 className="text-xl font-bold">Plan your metro route</h2>
-                <p className="text-slate-400 text-sm">Select the pickup clusters you are covering and share your available seats.</p>
+                <p className="text-slate-400 text-sm">Select the Stations you are covering.</p>
             </div>
             <div className="space-y-3">
                 <input
                     value={routeQuery}
                     onChange={(e) => setRouteQuery(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    placeholder="Search pickup point"
+                    placeholder="Search Station"
                 />
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {filteredRouteOptions.map((point: PickupPoint) => (
@@ -857,12 +972,20 @@ export function Dashboard() {
                                         <MapUpdater center={[centerLat, centerLon]} />
                                     </MapContainer>
                                 </div>
-                                <button
-                                    onClick={() => completeTrip(room.tripId)}
-                                    className="w-full rounded-lg border border-slate-600 py-2 text-sm font-semibold hover:border-emerald-400 transition"
-                                >
-                                    Mark Complete
-                                </button>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setActiveRoom({ id: room.tripId, status: { ...room, recordedAt: room.updatedAt || new Date().toISOString() } })}
+                                        className="flex-1 rounded-lg bg-blue-600 text-white py-2 text-sm font-semibold hover:bg-blue-700 transition"
+                                    >
+                                        Resume
+                                    </button>
+                                    <button
+                                        onClick={() => completeTrip(room.tripId)}
+                                        className="w-full rounded-lg border border-slate-600 py-2 text-sm font-semibold hover:border-emerald-400 transition"
+                                    >
+                                        Mark Complete
+                                    </button>
+                                </div>
                             </div>
                         );
                     })}
@@ -1014,11 +1137,11 @@ export function Dashboard() {
             <header className="bg-slate-800 border-b border-slate-700 p-4">
                 <div className="max-w-7xl mx-auto flex justify-between items-center">
                     <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isDriver ? 'bg-blue-600' : 'bg-purple-600'}`}>
-                        {isDriver ? <Navigation className="w-6 h-6 text-white" /> : <Search className="w-6 h-6 text-white" />}
-                    </div>
-                    <div>
-                        <h1 className="font-bold text-lg">{isDriver ? 'Driver Console' : 'Rider App'}</h1>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isDriver ? 'bg-blue-600' : 'bg-purple-600'}`}>
+                            {isDriver ? <Navigation className="w-6 h-6 text-white" /> : <Search className="w-6 h-6 text-white" />}
+                        </div>
+                        <div>
+                            <h1 className="font-bold text-lg">{isDriver ? 'Driver Console' : 'Rider App'}</h1>
                             <p className="text-xs text-slate-400">{user?.email}</p>
                             <p className="text-[11px] uppercase tracking-wide text-slate-500">Logged in as {isDriver ? 'Driver' : 'Rider'}</p>
                         </div>
@@ -1063,7 +1186,7 @@ export function Dashboard() {
                             />
                             <Marker position={[location.lat, location.lng]}>
                                 <Popup>
-                    {isDriver ? 'You are here' : 'Your Location'}
+                                    {isDriver ? 'You are here' : 'Your Location'}
                                 </Popup>
                             </Marker>
                             <MapUpdater center={[location.lat, location.lng]} />
@@ -1075,6 +1198,14 @@ export function Dashboard() {
                     )}
                 </div>
             </main>
+            {activeRoom && (
+                <Room
+                    tripId={activeRoom.id}
+                    initialStatus={activeRoom.status}
+                    onClose={() => setActiveRoom(null)}
+                    seats={typeof plannedSeats === 'number' ? plannedSeats : undefined}
+                />
+            )}
         </div>
     );
 }

@@ -16,7 +16,7 @@
     "react-dom": "^19.2.0",
     "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.9.6",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^2.3.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -25,6 +25,7 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@types/react-leaflet": "^3.0.0",
+    "@types/socket.io-client": "^1.4.32",
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.22",
     "eslint": "^9.39.1",

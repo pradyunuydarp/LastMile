@@ -1,0 +1,92 @@
+@startuml matching_flow
+
+skinparam backgroundColor #FEFEFE
+
+title Rider-Driver Matching Flow
+
+actor Driver
+actor Rider
+participant "Driver\nService" as DriverSvc
+participant "Rider\nService" as RiderSvc
+participant "Location\nService" as LocationSvc
+participant "Station\nService" as StationSvc
+participant "Matching\nService" as MatchingSvc
+participant "Notification\nService" as NotificationSvc
+participant "Trip\nService" as TripSvc
+
+== Setup Phase ==
+
+Driver -> DriverSvc : RegisterRoute(\nstations=[Central, Mission],\nseats=3, destination=Downtown)
+activate DriverSvc
+DriverSvc --> Driver : Route Registered
+deactivate DriverSvc
+
+Rider -> RiderSvc : RequestRide(\narrivalTime=18:30,\nstation=Central,\ndestination=Downtown)
+activate RiderSvc
+RiderSvc --> Rider : Request Accepted
+deactivate RiderSvc
+
+== Real-time Matching ==
+
+Driver -> LocationSvc : UpdateLocation(\nlat=37.7950, lon=-122.3980)
+activate LocationSvc
+
+LocationSvc -> StationSvc : DetectProximity()
+activate StationSvc
+StationSvc --> LocationSvc : Near "Central Station" (650m)
+deactivate StationSvc
+
+LocationSvc -> MatchingSvc : Match(\ndriverId=D123,\nstationId=Central)
+activate MatchingSvc
+
+MatchingSvc -> DriverSvc : GetDriverDetails(D123)
+activate DriverSvc
+DriverSvc --> MatchingSvc : seats=3, destination=Downtown
+deactivate DriverSvc
+
+MatchingSvc -> RiderSvc : FindCompatibleRiders(\nstation=Central,\ndestination=Downtown,\narrivalTime≈now)
+activate RiderSvc
+RiderSvc --> MatchingSvc : [Rider R456, Rider R789]
+deactivate RiderSvc
+
+MatchingSvc -> NotificationSvc : Notify(\ndriver=D123,\nriders=[R456, R789])
+activate NotificationSvc
+NotificationSvc -> Driver : "2 riders matched!"
+NotificationSvc -> Rider : "Driver on the way!"
+deactivate NotificationSvc
+
+MatchingSvc -> TripSvc : CreateTrip(\ndriver=D123,\nriders=[R456, R789])
+activate TripSvc
+TripSvc --> MatchingSvc : Trip T999 Created
+deactivate TripSvc
+
+MatchingSvc --> LocationSvc : Match Successful
+deactivate MatchingSvc
+LocationSvc --> Driver : Location Updated
+deactivate LocationSvc
+
+== Trip Execution ==
+
+Driver -> TripSvc : UpdateStatus(T999, status=PICKUP)
+activate TripSvc
+TripSvc -> NotificationSvc : Broadcast(status=PICKUP)
+activate NotificationSvc
+NotificationSvc -> Rider : "Driver arriving!"
+deactivate NotificationSvc
+deactivate TripSvc
+
+Driver -> TripSvc : UpdateStatus(T999, status=IN_PROGRESS)
+activate TripSvc
+TripSvc --> Driver : Status Updated
+deactivate TripSvc
+
+Driver -> TripSvc : UpdateStatus(T999, status=COMPLETED)
+activate TripSvc
+TripSvc -> NotificationSvc : Broadcast(status=COMPLETED)
+activate NotificationSvc
+NotificationSvc -> Rider : "Trip completed!"
+deactivate NotificationSvc
+TripSvc --> Driver : Trip Completed
+deactivate TripSvc
+
+@enduml

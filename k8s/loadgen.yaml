@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: lastmile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      containers:
+        - name: loadgen
+          image: pradyunuydarp/lastmile-loadgen:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MATCHING_ADDR
+              value: "matching.lastmile.svc.cluster.local:50053"
+            - name: CONCURRENCY
+              value: "50"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

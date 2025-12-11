@@ -49,7 +49,10 @@ func NewServerWithMatching(targetAddr string, logger *slog.Logger) *Server {
 
 	var client matching.MatchingServiceClient
 	if targetAddr != "" {
-		conn, err := grpc.Dial(targetAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.Dial(targetAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
+		)
 		if err == nil {
 			client = matching.NewMatchingServiceClient(conn)
 			l.Info("location matching client enabled", "target", targetAddr)

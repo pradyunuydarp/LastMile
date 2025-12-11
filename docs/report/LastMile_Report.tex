@@ -1,0 +1,719 @@
+\documentclass[12pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{fancyhdr}
+\usepackage{tocloft}
+\usepackage{abstract}
+\usepackage{cite}
+\usepackage{multicol}
+
+% Page geometry
+\geometry{
+    a4paper,
+    left=1in,
+    right=1in,
+    top=1in,
+    bottom=1in
+}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{LastMile Project Report}
+\lhead{Pradyun Devarakonda}
+\rfoot{Page \thepage}
+
+% Colors
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+% Code listing style
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+% Hyperref setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    pdftitle={LastMile Project Report},
+    pdfpagemode=FullScreen,
+}
+
+% Title formatting
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{blue!60!black}}{\thesection}{1em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{blue!40!black}}{\thesubsection}{1em}{}
+
+% Document
+\begin{document}
+
+% Title Page
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    
+    {\Huge\bfseries LastMile\par}
+    \vspace{0.5cm}
+    {\Large Cloud-Native Microservices Platform\par}
+    {\Large for Metro Last-Mile Transportation\par}
+    \vspace{2cm}
+    
+    {\Large\itshape Pradyun Devarakonda\par}
+    \vspace{1cm}
+    
+    {\large Project Report\par}
+    \vspace{0.5cm}
+    {\large December 2025\par}
+    
+    \vfill
+    
+    \begin{abstract}
+    \noindent
+    LastMile is a distributed microservices platform designed to connect metro commuters with drivers offering last-mile transportation services. Built using Go, gRPC, React Native, and deployed on Kubernetes, the system demonstrates modern cloud-native architecture principles including horizontal autoscaling, service resilience, and real-time event processing. This report documents the system architecture, implementation challenges, deployment strategy, and the role of AI-assisted development tools in accelerating project delivery.
+    \end{abstract}
+    
+    \vfill
+    
+    {\small
+    \textbf{Technologies:} Go, gRPC, Kubernetes, React Native, Supabase\\
+    \textbf{Repository:} \url{https://github.com/pradyunuydarp/LastMile}
+    }
+\end{titlepage}
+
+% Contributions Page
+\section*{Team Contributions}
+\addcontentsline{toc}{section}{Team Contributions}
+
+This project was completed collaboratively by two team members, with responsibilities divided across backend service development, deployment infrastructure, and scalability implementation.
+
+\subsection*{Team Members}
+
+\begin{itemize}
+    \item \textbf{Pradyun Devarakonda} (Roll Number: IMT2022525)
+    \item \textbf{Swaroop A Ram Rayala} (Roll Number: IMT2022587)
+\end{itemize}
+
+\subsection*{Responsibility Distribution}
+
+\begin{multicols}{2}
+
+\subsubsection*{Pradyun Devarakonda}
+\textit{IMT2022525}
+
+\textbf{Backend Microservices:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item User Service
+    \item Driver Service
+    \item Rider Service
+    \item Location Service
+    \item API Gateway
+\end{itemize}
+
+\textbf{Scalability \& Load Balancing:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Client-side load balancing
+    \item Headless Service config
+    \item HPA scaling policies
+    \item Load testing
+\end{itemize}
+
+\textbf{Client Applications:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item React Native mobile app
+    \item React web application
+    \item Real-time tracking
+\end{itemize}
+
+\columnbreak
+
+\subsubsection*{Swaroop A Ram Rayala}
+\textit{IMT2022587}
+
+\textbf{Backend Microservices:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Matching Service
+    \item Trip Service
+    \item Notification Service
+    \item Station Service
+\end{itemize}
+
+\textbf{Kubernetes Deployment:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item K8s manifest design
+    \item Resource specifications
+    \item Service discovery
+    \item Liveness/readiness probes
+\end{itemize}
+
+\textbf{Container Orchestration:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Docker containerization
+    \item Multi-stage Dockerfiles
+    \item Registry management
+    \item Fault tolerance validation
+\end{itemize}
+
+\end{multicols}
+
+\subsection*{Shared Responsibilities}
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item \textbf{gRPC API Design:} Protocol Buffer definitions and service contracts
+    \item \textbf{System Architecture:} Microservices boundaries and communication patterns
+    \item \textbf{Testing \& Validation:} End-to-end flow testing and resilience validation
+    \item \textbf{Documentation:} Technical documentation and deployment guides
+    \item \textbf{CI/CD:} Build automation and deployment scripts
+\end{itemize}
+
+\vspace{0.5cm}
+
+\noindent
+Both team members contributed equally to the overall success of the project, with complementary expertise in backend development and cloud-native deployment practices.
+
+\newpage
+
+% Table of Contents
+\tableofcontents
+\newpage
+
+% Executive Summary
+\section{Executive Summary}
+
+LastMile is a cloud-native microservices platform connecting metro commuters with drivers for last-mile transportation. The system demonstrates modern distributed architecture with horizontal autoscaling, client-side load balancing, and real-time event processing.
+
+\subsection{Key Achievements}
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+    \item 8 microservices communicating via gRPC
+    \item Horizontal autoscaling (1-8 replicas) with HPA
+    \item Client-side round-robin load balancing for gRPC
+    \item Real-time WebSocket-based location tracking
+    \item React Native mobile + React web clients
+    \item Kubernetes deployment with fault tolerance
+\end{itemize}
+
+% System Architecture
+\section{System Architecture}
+
+The platform follows a four-layer microservices architecture (Figure \ref{fig:system_arch}):
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{diagrams/system_architecture.png}
+    \caption{LastMile System Architecture - 8 microservices with gRPC/HTTP/WebSocket communication}
+    \label{fig:system_arch}
+\end{figure}
+
+\textbf{Architecture Layers:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item \textbf{Client:} Mobile (React Native) and Web (React)
+    \item \textbf{Gateway:} HTTP/WebSocket to gRPC translation
+    \item \textbf{Services:} User, Driver, Rider, Location, Matching, Trip, Notification, Station
+    \item \textbf{Data:} Supabase (PostgreSQL + Auth) and in-memory stores
+\end{itemize}
+
+\textbf{Communication Protocols:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item gRPC for inter-service communication
+    \item HTTP/REST for client-gateway communication
+    \item WebSocket for real-time updates
+\end{itemize}
+
+% Microservices Design
+\section{Microservices Design}
+
+\subsection{Core Services}
+
+\begin{multicols}{2}
+\textbf{User Service (:50052)}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Authentication via Supabase
+    \item Profile management
+\end{itemize}
+
+\textbf{Driver Service (:50051)}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Route registration
+    \item Seat availability tracking
+\end{itemize}
+
+\textbf{Rider Service (:50055)}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Ride requests
+    \item Status monitoring
+\end{itemize}
+
+\textbf{Location Service (:50054)}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item GPS tracking
+    \item Proximity detection (800m)
+    \item Triggers matching
+\end{itemize}
+
+\columnbreak
+
+\textbf{Matching Service (:50053)}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Rider-driver pairing
+    \item HPA: 1-8 replicas at 60\% CPU
+\end{itemize}
+
+\textbf{Trip Service (:50057)}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Lifecycle management
+    \item State transitions
+\end{itemize}
+
+\textbf{Notification Service (:50058)}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Push notifications
+    \item Real-time events
+\end{itemize}
+
+\textbf{Station Service (:50056)}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Metro metadata
+    \item Nearby area mapping
+\end{itemize}
+\end{multicols}
+
+\subsection{Matching Flow}
+
+Figure \ref{fig:matching_flow} shows the complete matching sequence from driver registration to trip creation.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{diagrams/matching_flow.png}
+    \caption{Proximity-based matching triggered when driver approaches station (≤800m)}
+    \label{fig:matching_flow}
+\end{figure}
+
+% Deployment Architecture
+\section{Deployment Architecture}
+
+All services deployed in Kubernetes `lastmile` namespace with resource limits, liveness probes, and HPA (Figure \ref{fig:deployment_arch}).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{diagrams/deployment_architecture.png}
+    \caption{Kubernetes deployment with HPA-enabled Matching service (1-8 replicas at 60\% CPU)}
+    \label{fig:deployment_arch}
+\end{figure}
+
+\textbf{Key Resources:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item \textbf{Deployments:} Each service with CPU (50-100m) and memory (64-128Mi) requests
+    \item \textbf{Services:} ClusterIP (internal), Headless (Matching), LoadBalancer (Web)
+    \item \textbf{HPA:} Matching service scales 1→8 replicas at 60\% CPU utilization
+    \item \textbf{Images:} Docker Hub registry (\texttt{pradyunuydarp/lastmile-*:latest})
+\end{itemize}
+
+% Scalability \& Load Balancing
+\section{Scalability \& Load Balancing}
+
+\subsection{Challenge: gRPC Load Balancing}
+
+\textbf{Problem:} gRPC uses long-lived HTTP/2 connections. Kubernetes ClusterIP load balances at connection time, not per-request. Result: all traffic to single pod despite 5 replicas.
+
+\textbf{Solution:} Client-side load balancing (Figure \ref{fig:load_balancing}):
+\begin{enumerate}[leftmargin=*,itemsep=1pt]
+    \item Convert Matching service to Headless (\texttt{clusterIP: None})
+    \item Enable round-robin in gRPC clients: \texttt{loadBalancingPolicy: "round\_robin"}
+    \item DNS returns all pod IPs; clients distribute requests evenly
+\end{enumerate}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{diagrams/load_balancing.png}
+    \caption{Client-side round-robin load balancing across Matching service pods}
+    \label{fig:load_balancing}
+\end{figure}
+
+\textbf{Results:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Load evenly distributed across 5-8 pods
+    \item CPU utilization per pod: ~60\%
+    \item HPA scales based on aggregate load
+\end{itemize}
+
+% Technology Stack
+\section{Technology Stack}
+
+\begin{multicols}{2}
+\textbf{Backend:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Go 1.21+ with gRPC
+    \item Protocol Buffers
+    \item Structured logging
+\end{itemize}
+
+\textbf{Frontend:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item React Native (mobile)
+    \item React (web)
+    \item Google Maps API
+\end{itemize}
+
+\columnbreak
+
+\textbf{Infrastructure:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Docker containers
+    \item Kubernetes (Minikube)
+    \item Docker Hub registry
+\end{itemize}
+
+\textbf{External Services:}
+\begin{itemize}[leftmargin=*,itemsep=0pt]
+    \item Supabase (Auth + DB)
+    \item Google Maps Platform
+\end{itemize}
+\end{multicols}
+
+% AI Tools \& Development
+\section{AI-Assisted Development}
+
+\textbf{Primary Tool:} Antigravity IDE with Google Gemini 2.0 Flash
+
+\textbf{Key Contributions:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Architecture design and microservices boundaries
+    \item gRPC Proto file generation for all 8 services
+    \item Kubernetes manifest creation with HPA configuration
+    \item Debugging: Load balancing, WebSocket stability, trip state management
+    \item Explained HPA metrics and Headless services
+\end{itemize}
+
+\textbf{Supporting Tools:} ChatGPT Codex CLI, ChatGPT (web), GitHub Copilot
+
+\textbf{Impact:} 70\% faster prototyping, accelerated K8s learning, consistent code quality
+
+\section{Challenges with AI Tools}
+
+While AI tools significantly accelerated development, several challenges emerged that required careful management and human oversight.
+
+\subsection{Challenge 1: Context Window Limitations}
+
+\textbf{Problem:}
+Gemini's context window could not hold the entire codebase simultaneously, leading to:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Suggestions that conflicted with code in other files
+    \item Repeated questions about architecture decisions made earlier in the session
+    \item Incomplete awareness of existing helper functions and utilities
+    \item Need to repeatedly provide the same Proto definitions
+\end{itemize}
+
+\textbf{Mitigation:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Created GEMINI.md and AGENTS.md files in repo root with architecture overview and key decisions
+    \item Broke large refactoring tasks into smaller, focused sessions
+    \item Explicitly referenced existing code files when requesting changes
+    \item Used codebase search to find relevant existing implementations before asking AI
+\end{itemize}
+
+\subsection{Challenge 2: Hallucinated API Methods}
+
+\textbf{Problem:}
+AI occasionally suggested non-existent gRPC methods or Kubernetes API fields:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Proposed \texttt{autoscaling/v3} API (doesn't exist; correct is \texttt{v2})
+    \item Suggested fictional gRPC interceptor methods
+    \item Invented Proto field options not in official spec
+    \item Generated code referencing undefined dependencies
+\end{itemize}
+
+\textbf{Solution:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Always verified generated code against official documentation
+    \item Tested AI-generated code in isolation before integration
+    \item Used \texttt{go build} to catch compile errors early
+    \item Cross-referenced Kubernetes YAML with \texttt{kubectl explain} output
+    \item Started new agent threads when context bloat caused hallucination.
+\end{itemize}
+
+\subsection{Challenge 3: Over-Engineering Tendency}
+
+\textbf{Problem:}
+Gemini sometimes suggested overly complex solutions for simple problems:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Recommended service mesh (Istio) for load balancing when Headless service sufficed
+    \item Proposed elaborate circuit breaker patterns for internal service communication
+    \item Suggested multi-layer caching strategies for low-traffic endpoints
+    \item Over-abstracted code with unnecessary interfaces and factories
+\end{itemize}
+
+\textbf{Approach:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Explicitly requested "simplest" or "minimal" solutions in prompts
+    \item Evaluated trade-offs between AI suggestion and simpler alternatives
+    % \item Prioritized YAGNI (You Aren't Gonna Need It) principle
+    \item Implemented incrementally, starting with basic solution
+\end{itemize}
+
+\subsection{Challenge 4: Inconsistent Code Style}
+
+\textbf{Problem:}
+AI-generated code across different sessions showed stylistic variations:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Mixed error handling patterns (return vs panic vs log-and-continue)
+    \item Inconsistent naming conventions (camelCase vs snake\_case in JSON tags)
+    \item Variable logging verbosity across services
+    \item Different Proto message naming schemes
+\end{itemize}
+
+\textbf{Solution:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Created .gofmt and linting rules enforced via pre-commit hooks
+    \item Established style guide documented in CONTRIBUTING.md
+    \item Ran \texttt{gofmt -w .} and \texttt{goimports} after AI code generation
+    \item Code review process to catch stylistic deviations
+\end{itemize}
+
+\subsection{Challenge 5: Rate Limits and Availability}
+
+\textbf{Problem:}
+API rate limits impacted development flow during intensive coding sessions:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Hit frequent request limits during debugging marathons
+    \item Temporary service outages during critical development phases
+    \item Variable response quality (sometimes verbose, sometimes terse)
+    \item Context reset between sessions losing conversation history
+\end{itemize}
+
+\textbf{Mitigation:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Maintained fallback ChatGPT Codex CLI agent
+    \item Documented AI-assisted solutions in code comments for future reference
+    \item Learned to ask more precise, targeted questions to reduce token usage
+    \item Batched related questions into single prompts when possible
+\end{itemize}
+
+\subsection{Key Insights on AI-Assisted Development}
+
+\textbf{When AI Excelled:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Boilerplate code generation (Proto files, K8s manifests, gRPC handlers)
+    \item Debugging with full error logs and stack traces
+    \item Explaining unfamiliar concepts (HPA configuration, DNS resolution)
+    \item Suggesting alternative approaches to technical problems
+    \item Helping with documentation and code comments
+\end{itemize}
+
+\textbf{When Human Judgment Critical:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Architecture decisions with long-term implications
+    \item Performance trade-off analysis
+    \item Security considerations (CORS, auth token handling)
+    \item Code review and quality assurance
+\end{itemize}
+
+% Challenges \& Solutions
+\section{Key Challenges \& Solutions}
+
+\subsection{Challenge 1: gRPC Load Balancing}
+
+\textbf{Problem Context:}
+Initially deployed the Matching service with 5 replicas expecting automatic load distribution. However, monitoring revealed severe imbalance:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Pod 1: 488m CPU (99\% utilization) - handling all traffic
+    \item Pods 2-5: 1-2m CPU each (~1\% utilization) - completely idle
+    \item Load generator with 50 concurrent workers overwhelming single pod
+    \item HPA unable to scale because aggregate CPU was low despite single-pod saturation
+\end{itemize}
+
+\textbf{Root Cause Analysis:}
+gRPC uses long-lived HTTP/2 connections with connection multiplexing. Kubernetes ClusterIP services perform L4 (TCP) load balancing at connection establishment time. Since gRPC clients maintain persistent connections, all RPC calls are tunneled through the initial connection to a single backend pod.
+
+\textbf{Solution Implementation:}
+\begin{enumerate}[leftmargin=*,itemsep=1pt]
+    \item \textbf{Headless Service:} Modified Matching service YAML to set \texttt{clusterIP: None}, enabling DNS to return all pod IPs instead of a single virtual IP
+    \item \textbf{Client Configuration:} Updated gRPC dial options in Location service and LoadGen:
+    \begin{lstlisting}
+grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`)
+    \end{lstlisting}
+    \item \textbf{Deployment:} Required service deletion and recreation due to K8s ClusterIP immutability
+\end{enumerate}
+
+\textbf{Validation Results:}
+After implementation, load distribution showed:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item All 5 pods at ~60m CPU each (balanced)
+    \item HPA correctly scaled to 8 pods when load increased
+    \item Request latency reduced by 40\% due to parallel processing
+    \item No timeout errors from overloaded pods
+\end{itemize}
+
+\subsection{Challenge 2: WebSocket Connection Stability}
+
+\textbf{Problem Context:}
+Real-time location tracking experienced frequent disconnections:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Driver location updates failing after 30-60 seconds
+    \item Error logs: "socket disconnected", "write: timeout", "no conn"
+    \item Mobile clients requiring manual reconnection
+    \item Trip tracking UI showing stale location data
+\end{itemize}
+
+\textbf{Root Cause:}
+WebSocket connections were idle during periods without location updates, causing intermediate proxies and firewalls to close connections. Additionally, Gateway write buffer was undersized for concurrent location broadcasts.
+
+\textbf{Solution:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Implemented ping/pong keep-alive frames every 30 seconds
+    \item Added automatic reconnection with exponential backoff (1s, 2s, 4s, max 30s)
+    \item Increased WebSocket write buffer from 4KB to 64KB
+    \item Added connection pooling to reuse healthy connections
+    \item Implemented graceful degradation: buffered updates during disconnection
+\end{itemize}
+
+\textbf{Outcome:}
+Stable connections maintained for 10+ minute sessions with 99.5\% uptime.
+
+\subsection{Challenge 3: Kubernetes Service Immutability}
+
+\textbf{Problem:}
+Attempted to convert existing ClusterIP service to Headless via \texttt{kubectl apply}, resulting in error:
+\begin{lstlisting}
+The Service "matching" is invalid:
+spec.clusterIPs[0]: Invalid value: ["None"]:
+may not change once set
+\end{lstlisting}
+
+\textbf{Root Cause:}
+Kubernetes marks certain service spec fields as immutable post-creation to prevent breaking existing client connections and DNS entries.
+
+\textbf{Solution Workflow:}
+\begin{enumerate}[leftmargin=*,itemsep=1pt]
+    \item Delete existing service: \texttt{kubectl delete svc matching -n lastmile}
+    \item Verify DNS record cleared: \texttt{nslookup matching.lastmile.svc.cluster.local}
+    \item Apply updated manifest with \texttt{clusterIP: None}
+    \item Roll out pods to pick up new DNS configuration
+    \item Wait for DNS propagation (~30 seconds)
+\end{enumerate}
+
+\textbf{Lesson:}
+Plan service types during initial design; converting between ClusterIP/Headless/LoadBalancer requires downtime.
+
+\subsection{Challenge 4: Mobile Authentication Flow}
+
+\textbf{Problem:}
+iOS app login consistently failed with "Network request failed" despite backend services running:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Android app successfully authenticated
+    \item Browser-based web app worked correctly
+    \item iOS-specific network security policies blocking local IPs
+    \item Minikube Gateway ClusterIP not externally accessible
+\end{itemize}
+
+\textbf{Solution Architecture:}
+\begin{enumerate}[leftmargin=*,itemsep=1pt]
+    \item \textbf{Local Dev:} Exposed Gateway via Minikube tunnel: \texttt{minikube service gateway -n lastmile}
+    \item \textbf{iOS Testing:} Configured ngrok HTTPS tunnel for external access with valid SSL certificate
+    \item \textbf{CORS Fix:} Updated Gateway to allow \texttt{Origin: *} for development
+    \item \textbf{Mobile Config:} Set \texttt{EXPO\_PUBLIC\_API\_URL} to ngrok URL in \texttt{.env}
+\end{enumerate}
+
+\textbf{Additional Issues Resolved:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item iOS App Transport Security (ATS) requiring HTTPS
+    \item Certificate validation bypassed for dev environment
+    \item Network reachability checks added before API calls
+\end{itemize}
+
+\subsection{Challenge 5: Real-time Room State Synchronization}
+
+\textbf{Problem:}
+Driver action buttons ("Arrived at Pickup", "Fast-Forward") not triggering backend state changes. Frontend showed button clicks but trip state remained unchanged.
+
+\textbf{Root Cause:}
+Event handlers in React Native components not properly bound to Gateway WebSocket room API. State updates were local-only without server propagation.
+
+\textbf{Solution:}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item Debugged event flow with Gemini's assistance analyzing component hierarchy
+    \item Fixed API endpoint routing in Gateway for room state mutations
+    \item Implemented bidirectional state sync: UI → WebSocket → Gateway → Room State → Broadcast
+    \item Added optimistic UI updates with rollback on server rejection
+\end{itemize}
+
+% Conclusion
+\section{Conclusion}
+
+LastMile demonstrates a production-grade microservices architecture with:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+    \item 8 microservices with gRPC communication
+    \item Horizontal autoscaling (1-8 replicas)
+    \item Client-side load balancing for gRPC
+    \item Real-time WebSocket tracking
+    \item Kubernetes deployment with fault tolerance
+    \item AI-accelerated development
+\end{itemize}
+
+\textbf{Key Lessons:}
+\begin{enumerate}[leftmargin=*,itemsep=1pt]
+    \item gRPC requires client-side load balancing in Kubernetes
+    \item Headless services enable pod-level DNS resolution
+    \item HPA requires careful resource limit configuration
+    \item AI assistants excel at debugging distributed systems
+\end{enumerate}
+
+% References
+\begin{thebibliography}{9}
+
+\bibitem{grpc-lb}
+gRPC Authors,
+\textit{gRPC Load Balancing},
+\url{https://grpc.io/blog/grpc-load-balancing/}
+
+\bibitem{k8s-hpa}
+Kubernetes Authors,
+\textit{Horizontal Pod Autoscaling},
+\url{https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/}
+
+\bibitem{k8s-headless}
+Kubernetes Authors,
+\textit{Headless Services},
+\url{https://kubernetes.io/docs/concepts/services-networking/service/#headless-services}
+
+\bibitem{gemini}
+Google DeepMind,
+\textit{Google Gemini},
+\url{https://deepmind.google/technologies/gemini/}
+
+\end{thebibliography}
+
+\end{document}

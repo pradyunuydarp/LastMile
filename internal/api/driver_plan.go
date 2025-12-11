@@ -27,7 +27,10 @@ func (g *Gateway) configureDriverRoute(payload driverRouteRequest) (driverRouteR
 	if len(targets) == 0 {
 		return driverRouteResponse{}, fmt.Errorf("unable to infer metro stations for selected pickups")
 	}
-	destination := g.pickupDisplayName(normalized[len(normalized)-1])
+	destination := payload.Destination
+	if destination == "" {
+		destination = g.pickupDisplayName(normalized[len(normalized)-1])
+	}
 	pickups := g.pickupPointsForIDs(normalized)
 
 	plan := &driverPlan{
