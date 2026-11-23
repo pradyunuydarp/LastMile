@@ -86,7 +86,7 @@ jobs:
       - name: Regenerate and compare with gen/go
         run: .github/scripts/check-proto-drift.sh
 
-  # Web: type-check and production build of the React app.
+  # Web: type-check, production build and lint of the React app.
   web:
     name: Web (typecheck, build, lint)
     runs-on: ubuntu-latest
@@ -101,24 +101,17 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          # No lockfile is committed yet, so there is nothing to key a cache on.
-          # Once web/package-lock.json exists: use `npm ci` and `cache: npm`.
-          package-manager-cache: false
+          cache: npm
+          # Relative to the repository root (defaults.run does not apply here).
+          cache-dependency-path: web/package-lock.json
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Type-check
         run: npx tsc -b
       - name: Build
         run: npm run build
-      # Non-blocking: main currently has 24 ESLint errors. Remove
-      # continue-on-error once `npm run lint` passes.
-      - name: Lint (non-blocking)
-        id: lint
-        continue-on-error: true
+      - name: Lint
         run: npm run lint
-      - name: Report lint result
-        if: steps.lint.outcome == 'failure'
-        run: echo "::warning title=ESLint::npm run lint reported errors (non-blocking for now); run it in web/ to see them."
 
   # E2E: every service as a local process, then one complete ride through the
   # gateway (scripts/smoke.sh). Service logs are uploaded if anything fails.
