@@ -1,0 +1,192 @@
+# Deploy: after CI passes on main, ship that exact commit to production.
+#
+#   preflight -> migrate (Supabase) -> deploy (Render) -> verify (live gateway)
+#
+# Setup (once): repository secrets RENDER_API_KEY and SUPABASE_DB_URL,
+# repository variable LASTMILE_GATEWAY_URL (optional RENDER_SERVICES), and an
+# environment named "production". Any missing secret only skips its step with
+# a notice, so this workflow stays green on forks and before setup.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Render services to deploy, space-separated (empty: RENDER_SERVICES variable, else all)"
+        type: string
+        default: ""
+      skip_migrations:
+        description: "Skip the Supabase migrations"
+        type: boolean
+        default: false
+
+# One deploy at a time, never cancelled halfway. If several wait, GitHub keeps
+# only the newest pending run, which is the commit we want anyway.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Preflight: decide what can run and which commit to ship. Only a successful
+  # CI run of a *push* to main in this repository counts (a pull request from a
+  # fork can also have a branch called "main").
+  preflight:
+    name: Preflight
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      migrate: ${{ steps.plan.outputs.migrate }}
+      render: ${{ steps.plan.outputs.render }}
+    steps:
+      - name: Check secrets and pick the commit
+        id: plan
+        env:
+          HAS_RENDER_API_KEY: ${{ secrets.RENDER_API_KEY != '' }}
+          HAS_SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL != '' }}
+          SKIP_MIGRATIONS: ${{ inputs.skip_migrations == true }}
+          # The commit CI tested (workflow_run), or the dispatched ref's head.
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          SETTINGS_URL: ${{ github.server_url }}/${{ github.repository }}/settings/secrets/actions
+        run: |
+          echo "sha=$SHA" >>"$GITHUB_OUTPUT"
+          migrate=false render=false
+          if [ "$SKIP_MIGRATIONS" = true ]; then
+            echo "::notice title=Migrations skipped::skip_migrations was set for this run"
+          elif [ "$HAS_SUPABASE_DB_URL" = true ]; then
+            migrate=true
+          else
+            # Runners have no IPv6, so the direct db.<ref>.supabase.co host fails; the
+            # session pooler URI (postgres://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres) works.
+            echo "::notice title=Supabase migrations are off::Add the repository secret SUPABASE_DB_URL at $SETTINGS_URL" \
+              "(Supabase > Connect > Session pooler URI; the direct db.<ref>.supabase.co host is IPv6-only)."
+          fi
+          if [ "$HAS_RENDER_API_KEY" = true ]; then
+            render=true
+          else
+            echo "::notice title=Render deploys are off::Add the repository secret RENDER_API_KEY at $SETTINGS_URL" \
+              "(Render > Account Settings > API Keys). Until then nothing is deployed."
+          fi
+          echo "migrate=$migrate" >>"$GITHUB_OUTPUT"
+          echo "render=$render" >>"$GITHUB_OUTPUT"
+          {
+            echo "### Deploy plan for \`${SHA:0:12}\`"
+            echo "- Supabase migrations: $migrate"
+            echo "- Render deploy: $render"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # Migrate: apply supabase/migrations/*.sql (idempotent) before any new code
+  # goes live, so new code never runs against an old schema.
+  migrate:
+    name: Supabase migrations
+    needs: preflight
+    if: needs.preflight.outputs.migrate == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          persist-credentials: false
+      - name: Install psql
+        run: command -v psql || { sudo apt-get update -q && sudo apt-get install -y -q postgresql-client; }
+      - name: Apply migrations
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if ! compgen -G "supabase/migrations/*.sql" >/dev/null; then
+            echo "::notice::no supabase/migrations/*.sql in this commit; nothing to apply"
+            exit 0
+          fi
+          bash scripts/db-migrate.sh
+
+  # Deploy: trigger Render deploys of the commit (backends, then gateway, then
+  # web) and wait until each one is live. See scripts/render-deploy.sh.
+  deploy:
+    name: Render deploy
+    needs: [preflight, migrate]
+    if: >-
+      !cancelled() &&
+      needs.preflight.outputs.render == 'true' &&
+      (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment:
+      name: production
+      url: ${{ vars.LASTMILE_GATEWAY_URL }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          persist-credentials: false
+      - name: Deploy ${{ needs.preflight.outputs.sha }}
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SHA: ${{ needs.preflight.outputs.sha }}
+          DEPLOY_SERVICES: ${{ inputs.services || vars.RENDER_SERVICES }}
+        run: |
+          read -ra names <<<"$DEPLOY_SERVICES" # empty: the script's default list
+          scripts/render-deploy.sh "$SHA" "${names[@]}"
+
+  # Verify: the public gateway answers and reports every service SERVING.
+  verify:
+    name: Verify production
+    needs: deploy
+    if: ${{ !cancelled() && needs.deploy.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Health and system status
+        env:
+          GATEWAY_URL: ${{ vars.LASTMILE_GATEWAY_URL }}
+        run: |
+          if [ -z "$GATEWAY_URL" ]; then
+            echo "::notice title=Verify skipped::Set the repository variable LASTMILE_GATEWAY_URL" \
+              "(Settings > Secrets and variables > Actions > Variables) to the https URL of lastmile-gateway or lastmile-stack."
+            exit 0
+          fi
+          url=${GATEWAY_URL%/}
+
+          # Free Render instances sleep when idle and take about a minute to wake.
+          for i in $(seq 1 18); do
+            if curl -sf --max-time 20 "$url/healthz" >/dev/null; then
+              echo "gateway healthy (attempt $i)"
+              break
+            fi
+            if [ "$i" = 18 ]; then
+              echo "::error::$url/healthz did not answer within about 4 minutes"
+              exit 1
+            fi
+            echo "  attempt $i: no answer yet, retrying in 10s"
+            sleep 10
+          done
+
+          # Downstream gRPC connections are lazy, so allow a few rounds to settle.
+          for i in $(seq 1 6); do
+            status=$(curl -sf --max-time 30 "$url/system/status" || echo '{}')
+            down=$(jq -r 'if (.services | type) == "array" and (.services | length) > 0
+                          then [.services[] | select(.status != "SERVING") | .name] | join(" ")
+                          else "no-services-reported" end' <<<"$status" 2>/dev/null || echo "unparseable-response")
+            [ -z "$down" ] && break
+            echo "  attempt $i: not SERVING yet: $down"
+            [ "$i" = 6 ] || sleep 10
+          done
+          jq . <<<"$status" 2>/dev/null || echo "$status"
+          if [ -n "$down" ]; then
+            echo "::error title=Production unhealthy::not SERVING: $down"
+            exit 1
+          fi
+          echo "all services SERVING at $url" | tee -a "$GITHUB_STEP_SUMMARY"

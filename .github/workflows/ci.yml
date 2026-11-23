@@ -1,0 +1,323 @@
+# CI: every push to main and every pull request. All jobs run in parallel.
+# A green run on main is what triggers .github/workflows/deploy.yml.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a PR cancels that PR's older run. Every other run gets its own
+# group, so runs on main are never cancelled or queued (Deploy needs them).
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || format('ci-run-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Images are pushed to GHCR only for pushes to main; PRs just build them.
+  PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+jobs:
+  # Go: module integrity, formatting, vet, build, and the race-enabled test suite.
+  go:
+    name: Go (fmt, vet, build, race tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify module checksums
+        run: go mod verify
+      - name: gofmt
+        run: |
+          mapfile -t files < <(git ls-files '*.go')
+          mapfile -t unformatted < <(gofmt -l "${files[@]}")
+          if [ "${#unformatted[@]}" -gt 0 ]; then
+            for f in "${unformatted[@]}"; do echo "::error file=$f::not gofmt-formatted (run: gofmt -w $f)"; done
+            gofmt -d "${unformatted[@]}"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: go test -race
+        run: go test -race -count=1 ./...
+
+  # Proto: gen/go must be exactly what api/*.proto produces with the pinned
+  # plugins. Only the protoc version line in each header is ignored.
+  proto:
+    name: Proto stubs up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROTOC_VERSION: "33.0"
+      PROTOC_SHA256: d99c011b799e9e412064244f0be417e5d76c9b6ace13a2ac735330fa7d57ad8f
+      PROTOC_GEN_GO_VERSION: v1.36.10
+      PROTOC_GEN_GO_GRPC_VERSION: v1.5.1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Direct download of the official release: exact version, verified checksum.
+      - name: Install protoc ${{ env.PROTOC_VERSION }} and the Go plugins
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/protoc.zip" \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          echo "${PROTOC_SHA256}  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "$RUNNER_TEMP/protoc/bin" >>"$GITHUB_PATH"
+          go install "google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}"
+          go install "google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}"
+          echo "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
+      - name: Regenerate and compare with gen/go
+        run: .github/scripts/check-proto-drift.sh
+
+  # Web: type-check and production build of the React app.
+  web:
+    name: Web (typecheck, build, lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          # No lockfile is committed yet, so there is nothing to key a cache on.
+          # Once web/package-lock.json exists: use `npm ci` and `cache: npm`.
+          package-manager-cache: false
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Type-check
+        run: npx tsc -b
+      - name: Build
+        run: npm run build
+      # Non-blocking: main currently has 24 ESLint errors. Remove
+      # continue-on-error once `npm run lint` passes.
+      - name: Lint (non-blocking)
+        id: lint
+        continue-on-error: true
+        run: npm run lint
+      - name: Report lint result
+        if: steps.lint.outcome == 'failure'
+        run: echo "::warning title=ESLint::npm run lint reported errors (non-blocking for now); run it in web/ to see them."
+
+  # E2E: every service as a local process, then one complete ride through the
+  # gateway (scripts/smoke.sh). Service logs are uploaded if anything fails.
+  e2e:
+    name: End-to-end smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+          # Separate cache key from the go job (that one holds race builds).
+          cache-dependency-path: |
+            go.sum
+            scripts/run-local.sh
+      - name: Build services
+        run: |
+          mkdir -p bin
+          for svc in station driver rider trip notification location user matching gateway loadgen; do
+            go build -o "bin/$svc" "./cmd/$svc"
+          done
+      - name: Start the stack
+        run: |
+          mkdir -p .run/logs
+          nohup scripts/run-local.sh >.run/logs/run-local.log 2>&1 &
+          echo $! >.run/run-local.pid
+      - name: Wait for the gateway (/healthz)
+        run: |
+          for i in $(seq 1 90); do
+            if curl -sf --max-time 2 http://localhost:8082/healthz >/dev/null; then
+              echo "gateway healthy after ${i}s"
+              exit 0
+            fi
+            if ! kill -0 "$(cat .run/run-local.pid)" 2>/dev/null; then
+              echo "::error::scripts/run-local.sh exited before the gateway came up"
+              cat .run/logs/run-local.log
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "::error::gateway not healthy after 90s"
+          tail -n 30 .run/logs/*.log
+          exit 1
+      - name: Smoke test (one complete ride)
+        timeout-minutes: 5
+        run: scripts/smoke.sh
+      - name: Upload service logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-service-logs
+          path: .run/logs/
+          include-hidden-files: true
+          retention-days: 7
+      - name: Stop the stack
+        if: always()
+        run: |
+          [ -f .run/run-local.pid ] || exit 0
+          pid=$(cat .run/run-local.pid)
+          kill -TERM "$pid" 2>/dev/null || true   # run-local.sh stops its children on TERM
+          for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          pkill -f "^bin/(station|driver|rider|trip|notification|location|user|matching|gateway)$" || true
+
+  # Migrations: apply supabase/migrations to a throwaway Postgres 16 (with the
+  # Supabase auth bits emulated), twice, to prove they are idempotent.
+  migrations:
+    name: Supabase migrations (Postgres 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      SUPABASE_DB_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Look for migrations
+        id: check
+        run: |
+          if compgen -G "supabase/migrations/*.sql" >/dev/null; then
+            echo "found=true" >>"$GITHUB_OUTPUT"
+            ls -1 supabase/migrations/*.sql
+          else
+            echo "found=false" >>"$GITHUB_OUTPUT"
+            echo "::notice title=Migrations skipped::no supabase/migrations/*.sql in this commit"
+          fi
+      - name: Install psql
+        if: steps.check.outputs.found == 'true'
+        run: command -v psql || { sudo apt-get update -q && sudo apt-get install -y -q postgresql-client; }
+      - name: Emulate Supabase (auth schema, roles) as superuser
+        if: steps.check.outputs.found == 'true'
+        run: |
+          if [ -f ci/supabase-emulation.sql ]; then
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q -f ci/supabase-emulation.sql
+          else
+            echo "::warning::ci/supabase-emulation.sql not found; migrations run against plain Postgres"
+          fi
+      - name: Apply migrations (first run)
+        if: steps.check.outputs.found == 'true'
+        run: bash scripts/db-migrate.sh
+      - name: Apply migrations again (must be a no-op)
+        if: steps.check.outputs.found == 'true'
+        run: bash scripts/db-migrate.sh
+      - name: Show resulting tables
+        if: steps.check.outputs.found == 'true'
+        run: psql "$SUPABASE_DB_URL" -c '\dt public.*'
+
+  # Manifests: Kubernetes YAML against the 1.31 schemas, the Compose file, and
+  # render.yaml (must at least be valid YAML).
+  manifests:
+    name: Manifests (Kubernetes, Compose, Render)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KUBECONFORM_VERSION: "0.8.0"
+      KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+      KUBERNETES_VERSION: "1.31.0"
+      YAMLLINT_VERSION: "1.38.0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install kubeconform ${{ env.KUBECONFORM_VERSION }}
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/kubeconform.tgz" \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  $RUNNER_TEMP/kubeconform.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/kubeconform.tgz" -C "$RUNNER_TEMP" kubeconform
+      - name: kubeconform k8s/*.yaml
+        run: |
+          "$RUNNER_TEMP/kubeconform" -strict -summary -output text \
+            -kubernetes-version "$KUBERNETES_VERSION" k8s/*.yaml
+      - name: docker compose config
+        run: docker compose config -q
+      - name: Lint render.yaml
+        run: |
+          if [ ! -f render.yaml ]; then
+            echo "::notice::render.yaml not found; skipping"
+            exit 0
+          fi
+          pipx run --spec "yamllint==${YAMLLINT_VERSION}" yamllint -f github -d relaxed render.yaml
+
+  # Images: build every service image (and the web image) with a shared GitHub
+  # Actions layer cache. On main they are also pushed to GHCR as
+  # ghcr.io/<owner>/lastmile-<service>:<sha> and :latest.
+  images:
+    name: Image ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write  # push to GHCR (only used on main)
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [station, driver, rider, trip, notification, location, user, matching, gateway, loadgen, web]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name
+        id: image
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lastmile-${SERVICE}" >>"$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.service == 'web' && 'web' || '.' }}
+          build-args: ${{ matrix.service != 'web' && format('SERVICE={0}', matrix.service) || '' }}
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+            ${{ steps.image.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=lastmile-${{ matrix.service }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
