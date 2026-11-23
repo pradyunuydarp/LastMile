@@ -41,6 +41,35 @@ flowchart LR
 | [`ci/supabase-emulation.sql`](../ci/supabase-emulation.sql) | Lets CI test the migrations on plain PostgreSQL 16 |
 | [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml), [`scripts/render-deploy.sh`](../scripts/render-deploy.sh) | The deploy pipeline |
 
+## What is live right now
+
+The class deployment uses the [free variant](#the-free-variant), so it costs
+nothing:
+
+| | |
+|---|---|
+| App | <https://lastmile-web-ihr9.onrender.com> (Render static site `lastmile-web`) |
+| Gateway | <https://lastmile-stack.onrender.com> (Render free web service `lastmile-stack`, region Singapore); `/healthz`, `/system/status` |
+| Database | Supabase project **LastMile-app**; migrations `0001`–`0004` applied |
+| Gateway → database | `PERSISTENCE_DSN` = session pooler, user `lastmile_app.<project-ref>` ([why](#a-separate-database-role-for-the-gateway)) |
+
+Both Render services were created through the Render API, not from a
+Blueprint, with auto-deploy off. They currently build from the branch
+`claude/youthful-lovelace-ihg7ev`. **After that branch is merged, change
+each service's branch to `main`** (service → **Settings → Build & Deploy →
+Branch**). Otherwise the Deploy workflow asks Render for a `main` commit the
+service doesn't track.
+
+Check it from anywhere:
+
+```bash
+curl -s https://lastmile-stack.onrender.com/system/status | jq '.services[] | {name, status}'
+GATEWAY=https://lastmile-stack.onrender.com scripts/smoke.sh
+```
+
+The first request after 15 idle minutes takes about 15 to 60 seconds,
+because a free instance sleeps. **Open the app a few minutes before class.**
+
 ## How it runs on Render
 
 - **The gateway is the only public backend.** It is a Render *web service*
@@ -117,9 +146,24 @@ GitHub repository. About 20 minutes.
    Providers → Email → Confirm email**, or sign-up won't log you in until
    the email is confirmed.
 
-You don't run any SQL by hand: the deploy pipeline applies
-`supabase/migrations` before every deploy. To do it once yourself:
+The deploy pipeline applies `supabase/migrations` before every deploy, so
+you don't write the schema yourself. To do it once now:
 `SUPABASE_DB_URL='<database URL>' scripts/db-migrate.sh`.
+
+4. Once the migrations have run, give the gateway its own login. Migration
+   `0004` creates the role `lastmile_app` without a password. In the
+   Supabase **SQL Editor**, set one (generate it, for example with
+   `openssl rand -hex 24`, and don't commit it):
+
+   ```sql
+   alter role lastmile_app with login password '<generated>';
+   ```
+
+   The gateway's `PERSISTENCE_DSN` is then the same session pooler URI with
+   the user `lastmile_app.<project-ref>` and that password:
+   `postgresql://lastmile_app.<project-ref>:<generated>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require`.
+   Keep the `postgres` URL for `SUPABASE_DB_URL` only: migrations need it
+   to create tables.
 
 ### 2. Render
 
@@ -132,7 +176,7 @@ You don't run any SQL by hand: the deploy pipeline applies
 
    | Service | Variable | Value | Empty means |
    |---|---|---|---|
-   | `lastmile-gateway` | `PERSISTENCE_DSN` | the database URL | no ride history |
+   | `lastmile-gateway` | `PERSISTENCE_DSN` | the `lastmile_app` URL (step 1.4) | no ride history |
    | `lastmile-user` | `SUPABASE_URL` | `https://<ref>.supabase.co` | demo accounts |
    | `lastmile-user` | `SUPABASE_KEY` | the anon key | demo accounts |
 
@@ -162,8 +206,9 @@ In the repository: **Settings → Secrets and variables → Actions**.
 | Kind | Name | Value |
 |---|---|---|
 | Secret | `RENDER_API_KEY` | the Render API key |
-| Secret | `SUPABASE_DB_URL` | the database URL (session pooler URI) |
-| Variable | `LASTMILE_GATEWAY_URL` | the gateway URL, e.g. `https://lastmile-gateway.onrender.com` (for the free variant: `lastmile-stack`'s URL) |
+| Secret | `SUPABASE_DB_URL` | the database URL as `postgres` (session pooler URI); migrations need a role that can create tables |
+| Variable | `LASTMILE_GATEWAY_URL` | the gateway URL, e.g. `https://lastmile-gateway.onrender.com` (for the free variant: `https://lastmile-stack.onrender.com`) |
+| Variable (optional) | `RENDER_SERVICES` | the services to deploy, space-separated. Free variant: `lastmile-stack lastmile-web`. Empty: everything in `render.yaml` that exists |
 
 Then **Settings → Environments → New environment** named `production`.
 The migrate and deploy jobs run in it; add *Required reviewers* there if
@@ -200,7 +245,7 @@ in filename order. `scripts/db-migrate.sh`:
 - records each applied file and its sha256 in
   `lastmile_meta.schema_migrations`;
 - **refuses to run if an applied file was edited**: applied migrations are
-  history. Change the schema with a new file (`0004_…sql`);
+  history. Change the schema with a new file (`0005_…sql`);
 - runs each file in its own transaction together with its tracking row,
   under an advisory lock, so a failed file leaves nothing behind and two
   runs at once don't collide;
@@ -222,9 +267,23 @@ scripts/db-migrate.sh && scripts/db-migrate.sh   # the second run does nothing
 ```
 
 Row Level Security is on for every table. `profiles` is readable by anyone
-(the User service needs that) and writable only by its owner; the ride
-tables have no policies, so the public API keys see nothing. The gateway is
-unaffected because it connects as the tables' owner.
+(the User service needs that) and writable only by its owner. The ride
+tables have a policy for `lastmile_app` only, so the public API keys
+(`anon`, `authenticated`) see nothing.
+
+### A separate database role for the gateway
+
+The gateway only reads and writes five ride tables, so it shouldn't log in
+as `postgres`, which can do anything, including read `auth.users`. Migration
+[`0004_app_role.sql`](../supabase/migrations/0004_app_role.sql) creates
+`lastmile_app` with `select, insert, update, delete` on exactly those
+tables and nothing else. If the gateway's password leaks, the attacker gets
+ride history, not your users' accounts. This is the *Database per service*
+pattern from *Microservices Patterns* at its smallest: the service
+gets its own credentials and its own slice of the data.
+
+The password is set by hand once (setup step 1.4), so it never appears in a
+migration, the repository or CI logs.
 
 ## Costs
 

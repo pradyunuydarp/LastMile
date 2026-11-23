@@ -21,6 +21,7 @@ with an AI coding agent.
 - [ ] `kubectl -n lastmile get hpa`: shows a percentage, not `<unknown>`. If unknown, wait 60 s for metrics-server.
 - [ ] Do one full rehearsal of all three demos below. Then `make load-stop` and `make scale-down`.
 - [ ] Open `docs/demo/index.html` once to check it renders on the classroom laptop.
+- [ ] Optional cloud backup: open <https://lastmile-web-ihr9.onrender.com> and run `GATEWAY=https://lastmile-stack.onrender.com scripts/smoke.sh`. It is the free Render tier, so it sleeps after 15 idle minutes; open it again 5 minutes before class. It can't do the kill-a-pod or scaling demos (one container, see `docs/deploy.md`).
 - [ ] Fill in `[Your name] · [Course code] · [Date]` on the cover slide.
 
 ## 15 minutes before

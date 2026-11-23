@@ -51,8 +51,13 @@ make help                                       # everything else
 Production runs on **Render** (gateway, eight private microservices, the
 web app as a static site) with **Supabase** for Postgres and optional Auth.
 Every push to `main` that passes CI is migrated, deployed and verified by
-GitHub Actions. Setup, costs (about $70/month, or $0 with the single-container
-`render.free.yaml`) and troubleshooting: [`docs/deploy.md`](docs/deploy.md).
+GitHub Actions. Setup, costs (about $70/month, or $0 with the
+single-container `render.free.yaml`) and troubleshooting:
+[`docs/deploy.md`](docs/deploy.md).
+
+**Live now** (free variant, sleeps when idle): the app at
+<https://lastmile-web-ihr9.onrender.com>, the gateway at
+<https://lastmile-stack.onrender.com/system/status>.
 
 ## Docs
 
