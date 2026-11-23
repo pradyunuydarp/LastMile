@@ -1,0 +1,992 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Open this file directly in a browser. No server or build step needed. -->
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>LastMile Control Room</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a transit control room. Live map of the metro stations on the left,
+   the cluster (services, Matching pods, request wires) on the right, the
+   service log underneath, reference sections below. Metro signage + terminal. */
+:root {
+  color-scheme: dark;
+  --bg: #0E1322;
+  --panel: #151C31;
+  --panel-2: #1C2440;
+  --line: #2A3453;
+  --fg: #EEEAE0;
+  --muted: #A7B0C7;
+  --dim: #7A85A1;
+  --yellow: #F5B700;
+  --yellow-text: #F5B700;
+  --on-yellow: #12182A;
+  --coral: #F0624D;
+  --coral-text: #F58B79;
+  --ok: #5CCBA6;
+  --map-bg: #111830;
+  --map-grid: #18213C;
+  --zone: rgba(245, 183, 0, 0.07);
+  --zone-edge: rgba(245, 183, 0, 0.32);
+  --font-display: 'Barlow Condensed', 'Arial Narrow', Arial, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, Segoe UI, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #ECEFF4; --panel: #FBFBFD; --panel-2: #F1F3F8; --line: #D3D8E3;
+    --fg: #141A2C; --muted: #4B546D; --dim: #646E88;
+    --yellow: #F5B700; --yellow-text: #8A5A00; --on-yellow: #12182A;
+    --coral: #E4553F; --coral-text: #B23A26; --ok: #1F7A5C;
+    --map-bg: #E3E8F1; --map-grid: #D7DDE9;
+    --zone: rgba(245, 183, 0, 0.12); --zone-edge: rgba(138, 90, 0, 0.38);
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ECEFF4; --panel: #FBFBFD; --panel-2: #F1F3F8; --line: #D3D8E3;
+  --fg: #141A2C; --muted: #4B546D; --dim: #646E88;
+  --yellow: #F5B700; --yellow-text: #8A5A00; --on-yellow: #12182A;
+  --coral: #E4553F; --coral-text: #B23A26; --ok: #1F7A5C;
+  --map-bg: #E3E8F1; --map-grid: #D7DDE9;
+  --zone: rgba(245, 183, 0, 0.12); --zone-edge: rgba(138, 90, 0, 0.38);
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px;
+}
+.wrap { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h1 { font-size: clamp(44px, 7vw, 84px); line-height: 0.95; }
+h2 { font-size: clamp(30px, 4vw, 40px); line-height: 1.05; }
+h3 { font-size: 22px; line-height: 1.1; font-weight: 600; }
+p { margin: 0; }
+.eyebrow { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--yellow-text); }
+.muted { color: var(--muted); }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+a { color: var(--yellow-text); }
+
+/* ---- header ---- */
+.top { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end; padding-top: 36px; }
+.top > div { min-width: 0; }
+.top .lede { max-width: 62ch; color: var(--muted); font-size: 16px; margin-top: 12px; }
+.badge-sim { font-family: var(--font-mono); font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; }
+@media (min-width: 721px) { .badge-sim { white-space: nowrap; } }
+@media (max-width: 720px) { .top { grid-template-columns: 1fr; } }
+
+/* ---- scenario bar ---- */
+.scenarios { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scenarios .label { font-family: var(--font-mono); font-size: 12px; color: var(--dim); margin-right: 4px; }
+button {
+  font: inherit; font-size: 14px; font-weight: 500; color: var(--fg);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 14px; cursor: pointer; transition: border-color .15s, background .15s;
+}
+button:hover { border-color: var(--yellow); }
+button:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+button.primary { background: var(--yellow); border-color: var(--yellow); color: var(--on-yellow); font-weight: 600; }
+button.danger { color: var(--coral-text); }
+button[aria-pressed="true"] { background: var(--yellow); border-color: var(--yellow); color: var(--on-yellow); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---- main grid ---- */
+.room { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+@media (max-width: 960px) { .room { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
+.panel-h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.panel-h .meta { font-family: var(--font-mono); font-size: 12px; color: var(--dim); }
+
+.map-box { position: relative; width: 100%; aspect-ratio: 0.8; max-height: 760px; border-radius: 10px; overflow: hidden; background: var(--map-bg); }
+.map-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+
+.right { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+
+/* services */
+.svc-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 560px) { .svc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.svc { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.svc-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.svc-name { font-family: var(--font-mono); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.pill { font-family: var(--font-mono); font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.up { color: var(--ok); }
+.pill.down { color: var(--coral-text); }
+.pill.starting { color: var(--yellow-text); }
+.svc button { font-size: 12px; padding: 4px 8px; align-self: flex-start; }
+.svc.is-down { border-color: var(--coral); }
+
+/* cluster */
+.cluster { position: relative; display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2.2fr); gap: 72px; align-items: center; min-height: 330px; padding: 8px 0; }
+@media (max-width: 560px) { .cluster { gap: 40px; } }
+.cluster canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.gw { position: relative; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px; text-align: center; }
+.gw .gw-name { font-family: var(--font-display); font-size: 26px; font-weight: 700; }
+.gw .gw-sub { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.pods { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pod { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; transition: opacity .3s, border-color .3s; }
+.pod-name { font-family: var(--font-mono); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pod-state { font-family: var(--font-mono); font-size: 11px; color: var(--muted); text-align: right; }
+.pod-bar { grid-column: 1 / -1; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.pod-bar i { display: block; height: 100%; width: 0%; background: var(--ok); border-radius: 3px; transition: width .4s, background .4s; }
+.pod.hot { border-color: var(--coral); }
+.pod.hot .pod-bar i { background: var(--coral); }
+.pod.starting { border-style: dashed; border-color: var(--yellow); opacity: .75; }
+.pod.terminating { opacity: .35; border-color: var(--coral); }
+.pod-empty { font-family: var(--font-mono); font-size: 13px; color: var(--coral-text); border: 1px dashed var(--coral); border-radius: 10px; padding: 14px; text-align: center; }
+
+/* controls */
+.controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 560px) { .controls { grid-template-columns: 1fr; } }
+.ctl { display: flex; flex-direction: column; gap: 8px; }
+.ctl-label { font-family: var(--font-mono); font-size: 12px; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.stepper button { border: 0; border-radius: 0; padding: 8px 14px; background: var(--panel-2); }
+.stepper output { font-family: var(--font-mono); font-weight: 600; min-width: 3.2ch; text-align: center; }
+.hpa { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+
+/* now + stats */
+.now { border-left: 3px solid var(--yellow); padding: 4px 0 4px 14px; font-size: 15px; max-width: 70ch; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.stat b { display: block; font-family: var(--font-display); font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat span { font-size: 12px; color: var(--muted); }
+
+/* log */
+.log { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; height: 230px; overflow-y: auto; margin: 0; padding: 12px 14px; list-style: none; background: var(--map-bg); border-radius: 10px; }
+.log li { display: grid; grid-template-columns: 5ch 15ch minmax(0, 1fr); gap: 10px; }
+.log .t { color: var(--dim); }
+.log .s { color: var(--yellow-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log .warn .m { color: var(--coral-text); }
+.log .good .m { color: var(--ok); }
+@media (max-width: 560px) { .log li { grid-template-columns: 5ch minmax(0, 1fr); } .log .s { grid-column: 2; } .log .m { grid-column: 1 / -1; } }
+
+/* reference sections */
+.ref { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+@media (max-width: 860px) { .ref { grid-template-columns: 1fr; } }
+.ref .panel { display: flex; flex-direction: column; gap: 12px; }
+.map-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.map-table td { padding: 8px 0; border-top: 1px solid var(--line); vertical-align: top; }
+.map-table td:first-child { width: 42%; padding-right: 12px; color: var(--muted); }
+.states { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 13px; }
+.state { border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; padding: 6px 10px; }
+.state.end { border-color: var(--ok); color: var(--ok); }
+.arrow { color: var(--dim); }
+.trans { font-size: 14px; color: var(--muted); }
+.cmd { display: flex; gap: 8px; align-items: center; background: var(--map-bg); border-radius: 8px; padding: 8px 8px 8px 12px; min-width: 0; }
+.cmd code { flex: 1; overflow-x: auto; white-space: nowrap; }
+.cmd button { font-size: 12px; padding: 4px 10px; flex: none; }
+footer { font-size: 13px; color: var(--dim); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <p class="eyebrow">LastMile · Software Architecture &amp; Design Patterns</p>
+      <h1>Break it yourself.</h1>
+      <p class="lede">Riders step off the metro in Bengaluru. Drivers pass by with free seats. Eight microservices decide who rides with whom, a few minutes before each car reaches the station. Kill a service, scale Matching to five, and watch what holds.</p>
+    </div>
+    <p class="badge-sim">Simulation in your browser · 1 s = 30 s of city time</p>
+  </header>
+
+  <div class="scenarios" role="group" aria-label="Scenarios">
+    <span class="label">Try</span>
+    <button id="sc-normal" class="primary">Normal day</button>
+    <button id="sc-kill">Kill a Matching pod</button>
+    <button id="sc-scale">Scale under load</button>
+    <button id="sc-bug">Show the scaling bug</button>
+    <button id="sc-gateway" class="danger">Kill the gateway</button>
+    <button id="btn-pause" aria-pressed="false">Pause</button>
+  </div>
+
+  <p class="now" id="now" aria-live="polite">Riders appear at metro stations and book a ride.</p>
+
+  <div class="room">
+    <section class="panel" aria-labelledby="map-h">
+      <div class="panel-h"><h3 id="map-h">The city</h3><span class="meta" id="clock">08:30</span></div>
+      <div class="map-box"><canvas id="map" aria-label="Map of metro stations with drivers moving between them, riders waiting, and 1.5 km approach rings"></canvas></div>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--coral)"></i>driver (dots = seats taken)</span>
+        <span><i class="sw" style="background:var(--fg)"></i>rider waiting</span>
+        <span><i class="sw" style="background:var(--yellow)"></i>rider matched</span>
+        <span><i class="sw" style="border:2px dashed var(--yellow-text)"></i>1.5 km approach ring</span>
+      </div>
+    </section>
+
+    <div class="right">
+      <section class="panel" aria-labelledby="svc-h">
+        <div class="panel-h"><h3 id="svc-h">Services</h3><span class="meta">gRPC health</span></div>
+        <div class="svc-grid" id="svcs"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="cl-h">
+        <div class="panel-h"><h3 id="cl-h">Matching deployment</h3><span class="meta" id="lb-meta">headless Service · round robin</span></div>
+        <div class="cluster" id="cluster">
+          <canvas id="wires"></canvas>
+          <div class="gw" id="gw"><div class="gw-name">Gateway</div><div class="gw-sub">gRPC client</div></div>
+          <div class="pods" id="pods"></div>
+        </div>
+        <div class="controls">
+          <div class="ctl">
+            <span class="ctl-label">Replicas</span>
+            <div class="row">
+              <div class="stepper"><button id="rep-minus" aria-label="Fewer Matching replicas">−</button><output id="rep" aria-live="polite">2</output><button id="rep-plus" aria-label="More Matching replicas">+</button></div>
+              <button id="kill-pod" class="danger">Kill a pod</button>
+            </div>
+          </div>
+          <div class="ctl">
+            <span class="ctl-label">Kubernetes Service</span>
+            <div class="row">
+              <button id="lb-rr" aria-pressed="true">Headless</button>
+              <button id="lb-pin" aria-pressed="false">Normal</button>
+            </div>
+          </div>
+          <div class="ctl">
+            <span class="ctl-label">Load generator</span>
+            <div class="row"><button id="load" aria-pressed="false">Off</button><span class="hpa" id="load-meta">0 req/s</span></div>
+          </div>
+          <div class="ctl">
+            <span class="ctl-label">Autoscaler (HPA, target 60% CPU)</span>
+            <div class="row"><button id="hpa" aria-pressed="false">Off</button><span class="hpa" id="hpa-meta">—</span></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="stats">
+        <div class="stat"><b id="st-done">0</b><span>rides completed</span></div>
+        <div class="stat"><b id="st-wait">0</b><span>riders waiting</span></div>
+        <div class="stat"><b id="st-avg">–</b><span>avg wait for pickup</span></div>
+        <div class="stat"><b id="st-decided">0</b><span>decisions by Matching</span></div>
+        <div class="stat"><b id="st-unavail">0</b><span>“try again” answers</span></div>
+        <div class="stat"><b id="st-err">0</b><span>load requests failing /s</span></div>
+      </div>
+    </div>
+  </div>
+
+  <section class="panel" aria-labelledby="log-h">
+    <div class="panel-h"><h3 id="log-h">Service log</h3><span class="meta">what the real services print</span></div>
+    <ol class="log" id="log"></ol>
+  </section>
+
+  <div class="ref">
+    <section class="panel">
+      <p class="eyebrow">Where this lives in the code</p>
+      <h2>Same rules as the repo</h2>
+      <table class="map-table">
+        <tr><td>Who can ride with whom</td><td><code>internal/matching/rules.go</code>: trip started, pickup on route and not passed, free seat, same destination, arrives within 15 min</td></tr>
+        <tr><td>The 1.5 km approach ring</td><td><code>internal/location/server.go</code> reports the ping that <i>enters</i> a ring, once</td></tr>
+        <tr><td>Round robin, retries, reconnect every 30 s</td><td><code>internal/pkg/chassis</code></td></tr>
+        <tr><td>Headless Service, HPA 1–5</td><td><code>k8s/lastmile.yaml</code></td></tr>
+        <tr><td>“Try again” instead of an error</td><td><code>internal/api/matching_client.go</code></td></tr>
+        <tr><td>Re-registering drivers after a restart</td><td><code>refreshDrivers</code> in <code>internal/api/gateway.go</code></td></tr>
+      </table>
+    </section>
+    <section class="panel">
+      <p class="eyebrow">A ride’s life</p>
+      <h2>Four states, one trip</h2>
+      <div class="states">
+        <span class="state">awaiting_rider</span><span class="arrow">→</span>
+        <span class="state">pending</span><span class="arrow">→</span>
+        <span class="state">in_progress</span><span class="arrow">→</span>
+        <span class="state end">completed</span>
+      </div>
+      <p class="trans">A driver accepts, then the rider approves (<code>pending</code>). The car reaches the station and the rider gets in (<code>in_progress</code>). The car reaches the rider’s destination, the seat frees up (<code>completed</code>). If the rider declines or doesn’t answer in 25 s, the seat goes back and the rider waits again.</p>
+      <p class="eyebrow" style="margin-top:8px">Run the real thing</p>
+      <div class="cmd"><code>scripts/run-local.sh</code><button data-copy="scripts/run-local.sh">Copy</button></div>
+      <div class="cmd"><code>scripts/smoke.sh</code><button data-copy="scripts/smoke.sh">Copy</button></div>
+      <div class="cmd"><code>docker compose up --build --scale matching=3</code><button data-copy="docker compose up --build --scale matching=3">Copy</button></div>
+      <p class="trans">Demo logins: <code>driver@lastmile.demo</code> and <code>rider@lastmile.demo</code>, password <code>lastmile</code>.</p>
+    </section>
+  </div>
+
+  <footer>This page models LastMile’s behaviour for teaching; numbers on it come from the simulation, not from a live cluster. The architecture, station coordinates and rules match the repository.</footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- reference data (internal/catalog) ----------
+  const STATIONS = [
+    { id: 'btm', lab: [-12, 4, 'right'], name: 'BTM Layout', lat: 12.9122, lon: 77.6092, areas: [['BTM 2nd Stage', 12.9169, 77.6105], ['Jayadeva Hospital', 12.9189, 77.5956]] },
+    { id: 'silkboard', lab: [0, -14, 'center'], name: 'Central Silk Board', lat: 12.9165, lon: 77.6238, areas: [['Silk Board Flyover', 12.9160, 77.6239], ['Madiwala Police Station', 12.9188, 77.6176]] },
+    { id: 'hsr', lab: [10, 20, 'left'], name: 'HSR Layout', lat: 12.9121, lon: 77.6387, areas: [['HSR 27th Main', 12.9082, 77.6475], ['Agara Lake', 12.9215, 77.6510], ['Kudlu Gate', 12.8936, 77.6513]] },
+    { id: 'koramangala', lab: [10, -10, 'left'], name: 'Koramangala', lat: 12.9345, lon: 77.6266, areas: [['Forum Mall', 12.9349, 77.6113], ['Sony World Junction', 12.9353, 77.6393], ['Ejipura Signal', 12.9304, 77.6260]] },
+    { id: 'bellandur', lab: [0, -14, 'center'], name: 'Bellandur', lat: 12.9381, lon: 77.6951, areas: [['Bellandur Gate', 12.9378, 77.6790], ['Iblur Junction', 12.9248, 77.6773]] },
+    { id: 'ecity', lab: [12, 6, 'left'], name: 'Electronic City', lat: 12.8456, lon: 77.6600, areas: [['Wipro Gate', 12.8467, 77.6624], ['Infosys Gate', 12.8459, 77.6666], ['Velankani Tech Park', 12.8449, 77.6615], ['Doddathogur Cross', 12.8365, 77.6642]] },
+    { id: 'konappana', lab: [-12, -4, 'right'], name: 'Konappana Agrahara', lat: 12.8519, lon: 77.6546, areas: [['Siemens Campus', 12.8553, 77.6515], ['PES IT Junction', 12.8581, 77.6493], ['Hosa Road Junction', 12.8721, 77.6647]] },
+    { id: 'huskur', lab: [12, 4, 'left'], name: 'Huskur Road', lat: 12.8209, lon: 77.6954, areas: [['Huskur Junction', 12.8188, 77.6924], ['D Mart Huskur', 12.8170, 77.6972], ['Electronic City Phase 2', 12.8149, 77.6968]] },
+    { id: 'bommasandra', lab: [12, 18, 'left'], name: 'Bommasandra', lat: 12.8006, lon: 77.7003, areas: [['Narayana Health City', 12.8008, 77.6846], ['Chandapura Circle', 12.8011, 77.7039], ['Bommasandra Industrial', 12.8019, 77.7018]] },
+  ];
+  const YELLOW_LINE = ['btm', 'silkboard', 'ecity', 'konappana', 'huskur', 'bommasandra'];
+  const ZONE = 1500; // metres, catalog.ApproachRadiusMeters
+
+  // Project lat/lon to metres on a flat plane (fine at city scale).
+  const B = { latMin: 12.790, latMax: 12.946, lonMin: 77.588, lonMax: 77.714 };
+  const M_LAT = 111320, M_LON = 111320 * Math.cos(12.87 * Math.PI / 180);
+  const WORLD_W = (B.lonMax - B.lonMin) * M_LON, WORLD_H = (B.latMax - B.latMin) * M_LAT;
+  const toM = (lat, lon) => ({ x: (lon - B.lonMin) * M_LON, y: (B.latMax - lat) * M_LAT });
+  const ST = {};
+  STATIONS.forEach((s) => { const p = toM(s.lat, s.lon); s.x = p.x; s.y = p.y; s.areas = s.areas.map(([n, la, lo]) => ({ name: n, ...toM(la, lo) })); ST[s.id] = s; });
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  const ROUTES = [
+    ['btm', 'silkboard', 'hsr', 'ecity', 'konappana'],
+    ['koramangala', 'hsr', 'konappana', 'ecity'],
+    ['bellandur', 'hsr', 'silkboard', 'btm'],
+    ['bommasandra', 'huskur', 'ecity', 'konappana'],
+    ['ecity', 'huskur', 'bommasandra'],
+  ];
+  const DRIVER_NAMES = ['Asha', 'Ravi', 'Meera', 'Imran', 'Divya'];
+  const RIDER_NAMES = ['Kabir', 'Priya', 'Ananya', 'Rohan', 'Sana', 'Arjun', 'Neha', 'Vikram', 'Isha', 'Farhan', 'Tara', 'Dev', 'Zoya', 'Nikhil', 'Pooja', 'Aditya'];
+  const SPEED = 170;          // metres per real second (≈ city time at 30x)
+  const POD_CAPACITY = 1000;  // load-generator req/s one pod serves at 100% CPU
+  const LOAD_RATE = 2600;     // offered load when the generator is on
+
+  // ---------- state ----------
+  let S;
+  function freshState() {
+    return {
+      t: 0, clock: 8.5 * 3600, paused: false,
+      riders: [], drivers: [], nextRider: 1, spawnIn: 1,
+      pods: [], desired: 2, rr: 0, lb: 'rr', pinned: null,
+      loadOn: false, hpaOn: false, hpaEvalIn: 2, lowSince: null,
+      svc: Object.fromEntries(['gateway', 'user', 'driver', 'rider', 'station', 'location', 'trip', 'notification'].map((k) => [k, { state: 'up', until: 0 }])),
+      stats: { done: 0, decided: 0, unavailable: 0, waits: [], err: 0, gaveUp: 0 },
+      fx: [], particles: [], particleBudget: 0, cpuAvg: 0,
+    };
+  }
+
+  function podName() {
+    const c = 'bcdfghjkmnpqrstvwxz2456789';
+    let s = 'matching-';
+    for (let i = 0; i < 5; i++) s += c[Math.floor(Math.random() * c.length)];
+    return s;
+  }
+
+  function makeDriver(i) {
+    const route = ROUTES[i % ROUTES.length].slice();
+    const first = ST[route[0]], second = ST[route[1]];
+    const away = { x: first.x - second.x, y: first.y - second.y };
+    const len = Math.hypot(away.x, away.y) || 1;
+    return {
+      id: 'driver-' + DRIVER_NAMES[i].toLowerCase(), name: DRIVER_NAMES[i], seats: 3, free: 3,
+      x: first.x + away.x / len * 2600, y: first.y + away.y / len * 2600,
+      route, next: 0, mode: 'route', pauseFor: 0, onboard: [], assigned: [], inZone: new Set(), routeNo: i,
+    };
+  }
+
+  function reset() {
+    S = freshState();
+    S.drivers = DRIVER_NAMES.map((_, i) => makeDriver(i));
+    for (let i = 0; i < S.desired; i++) S.pods.push({ name: podName(), state: 'ready', at: 0, hits: 0, rate: 0, cpu: 0 });
+    $('#log').innerHTML = '';
+    log('gateway', 'listening on :8082 · 8 services SERVING');
+    log('matching', S.pods.map((p) => p.name).join(', ') + ' ready');
+    renderServices(); renderPods(); syncControls();
+  }
+
+  // ---------- log ----------
+  const fmtClock = (sec) => {
+    const h = Math.floor(sec / 3600) % 24, m = Math.floor(sec / 60) % 60;
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  };
+  function log(svc, msg, kind) {
+    const ol = $('#log');
+    const nearBottom = ol.scrollHeight - ol.scrollTop - ol.clientHeight < 40;
+    const li = document.createElement('li');
+    if (kind) li.className = kind;
+    li.innerHTML = '<span class="t"></span><span class="s"></span><span class="m"></span>';
+    li.children[0].textContent = fmtClock(S.clock);
+    li.children[1].textContent = svc;
+    li.children[2].textContent = msg;
+    ol.appendChild(li);
+    while (ol.children.length > 160) ol.removeChild(ol.firstChild);
+    if (nearBottom) ol.scrollTop = ol.scrollHeight;
+  }
+
+  // ---------- services ----------
+  const up = (k) => S.svc[k].state === 'up';
+  const SERVICE_NOTES = {
+    gateway: 'gateway down: the only way in is gone. No bookings, no live updates. Single point of failure.',
+    user: 'user down: new sign-ins fail; people already signed in keep their token and keep going',
+    driver: 'driver down: gateway keeps serving its last snapshot of drivers',
+    rider: 'rider down: not on the booking path yet (the gateway still owns rider state)',
+    station: 'station down: gateway and location fall back to the built-in station catalog',
+    location: 'location down: no approach-ring triggers; matching only runs when a rider books',
+    trip: 'trip down: not on the booking path yet (the gateway still owns trips)',
+    notification: 'notification down: pushes are skipped; socket.io updates still flow from the gateway',
+  };
+  function killService(k) {
+    if (!up(k)) return;
+    S.svc[k] = { state: 'down', until: S.t + (k === 'gateway' ? 6 : 4) };
+    log('kubernetes', 'pod ' + k + '-' + podName().slice(9) + ' killed; Deployment starts a replacement', 'warn');
+    log(k === 'gateway' ? 'clients' : 'gateway', SERVICE_NOTES[k], 'warn');
+    renderServices();
+  }
+  function tickServices() {
+    for (const [k, s] of Object.entries(S.svc)) {
+      if (s.state === 'down' && S.t >= s.until) { S.svc[k] = { state: 'starting', until: S.t + 1.2 }; renderServices(); }
+      else if (s.state === 'starting' && S.t >= s.until) {
+        S.svc[k] = { state: 'up', until: 0 };
+        log(k, 'restarted · health SERVING', 'good');
+        if (k === 'driver') log('gateway', 're-registered ' + S.drivers.length + ' drivers the Driver service forgot', 'good');
+        if (k === 'gateway') log('gateway', 'back. Web and mobile clients reconnect over socket.io', 'good');
+        renderServices();
+      }
+    }
+  }
+  function renderServices() {
+    const box = $('#svcs');
+    box.innerHTML = '';
+    for (const k of Object.keys(S.svc)) {
+      const s = S.svc[k];
+      const div = document.createElement('div');
+      div.className = 'svc' + (s.state === 'down' ? ' is-down' : '');
+      const label = s.state === 'up' ? 'SERVING' : s.state === 'down' ? 'DOWN' : 'STARTING';
+      div.innerHTML = '<div class="svc-top"><span class="svc-name"></span><span class="pill"></span></div><button class="danger">Kill</button>';
+      div.querySelector('.svc-name').textContent = k;
+      const pill = div.querySelector('.pill');
+      pill.textContent = label;
+      pill.classList.add(s.state === 'up' ? 'up' : s.state === 'down' ? 'down' : 'starting');
+      const b = div.querySelector('button');
+      b.disabled = s.state !== 'up';
+      b.setAttribute('aria-label', 'Kill the ' + k + ' service');
+      b.addEventListener('click', () => killService(k));
+      box.appendChild(div);
+    }
+  }
+
+  // ---------- matching pods ----------
+  function readyPods() { return S.pods.filter((p) => p.state === 'ready'); }
+  function reconcile() {
+    const alive = S.pods.filter((p) => p.state !== 'terminating');
+    if (alive.length < S.desired) {
+      const p = { name: podName(), state: 'starting', at: S.t + 2.5, hits: 0, rate: 0, cpu: 0 };
+      S.pods.push(p);
+      log('kubernetes', 'creating ' + p.name + ' (want ' + S.desired + ' replicas)');
+      renderPods();
+    } else if (alive.length > S.desired) {
+      const victim = alive.slice().reverse().find((p) => p.state === 'starting') || alive[alive.length - 1];
+      terminate(victim, 'scaled down');
+    }
+    for (const p of S.pods) {
+      if (p.state === 'starting' && S.t >= p.at) { p.state = 'ready'; log(p.name, 'health SERVING · joins DNS for matching', 'good'); renderPods(); }
+    }
+    const before = S.pods.length;
+    S.pods = S.pods.filter((p) => !(p.state === 'terminating' && S.t >= p.at));
+    if (S.pods.length !== before) renderPods();
+  }
+  function terminate(p, why) {
+    if (!p || p.state === 'terminating') return;
+    p.state = 'terminating'; p.at = S.t + 0.8;
+    log(p.name, why === 'killed' ? 'SIGTERM · health NOT_SERVING · draining' : 'scaled down · draining', why === 'killed' ? 'warn' : undefined);
+    if (S.pinned === p) S.pinned = null;
+    renderPods();
+  }
+  function pickPod() {
+    const ready = readyPods();
+    if (!ready.length) return null;
+    if (S.lb === 'rr') return ready[(S.rr++) % ready.length];
+    if (!S.pinned || S.pinned.state !== 'ready') {
+      S.pinned = ready[Math.floor(Math.random() * ready.length)];
+      log('gateway', 'HTTP/2 connection to matching Service → lands on ' + S.pinned.name);
+    }
+    return S.pinned;
+  }
+  function callMatching(rpc, detail) {
+    if (!up('gateway')) return null;
+    const pod = pickPod();
+    if (!pod) { S.stats.unavailable++; return null; }
+    pod.hits++; S.stats.decided++;
+    spawnParticle(pod, true);
+    return pod;
+  }
+
+  // ---------- riders & matching rules ----------
+  function eligible(d, r) {
+    if (d.mode !== 'route') return false;               // rule 1: trip active
+    const idx = d.route.indexOf(r.station.id);
+    if (idx < 0 || idx < d.next) return false;           // rules 2-3: on route, not passed
+    return d.free > 0;                                   // rule 4: free seat (rule 5: drivers here go "anywhere")
+  }
+  function assign(d, r, pod, how) {
+    d.free--; d.assigned.push(r);
+    r.state = 'matched'; r.driver = d;
+    const km = (dist(d, r.station) / 1000).toFixed(1);
+    log(pod.name, how + ' · ' + r.name + ' → ' + d.name + ' (' + km + ' km away)');
+    S.fx.push({ kind: 'link', a: d, b: r, until: S.t + 1.4 });
+  }
+  function book(r) {
+    const pod = callMatching('RankDrivers');
+    if (!pod) {
+      if (up('gateway')) log('gateway', 'Matching unavailable · told ' + r.name + ' “try again in a few seconds”', 'warn');
+      r.retryAt = S.t + 5;
+      return;
+    }
+    const cands = S.drivers.filter((d) => eligible(d, r)).sort((a, b) => dist(a, r.station) - dist(b, r.station));
+    if (cands.length) assign(cands[0], r, pod, 'RankDrivers');
+    else { log(pod.name, 'RankDrivers · ' + r.name + ' at ' + r.station.name + ': no driver yet, waits for one to approach'); r.retryAt = null; }
+  }
+  function spawnRider() {
+    const st = STATIONS[Math.floor(Math.random() * STATIONS.length)];
+    const area = st.areas[Math.floor(Math.random() * st.areas.length)];
+    const a = Math.random() * Math.PI * 2, rad = 180 + Math.random() * 220;
+    const r = {
+      id: 'rider-' + S.nextRider, name: RIDER_NAMES[(S.nextRider - 1) % RIDER_NAMES.length] + (S.nextRider > RIDER_NAMES.length ? ' ' + Math.ceil(S.nextRider / RIDER_NAMES.length) : ''),
+      station: st, dest: area, x: st.x + Math.cos(a) * rad, y: st.y + Math.sin(a) * rad,
+      state: 'waiting', born: S.t, bornClock: S.clock, retryAt: null,
+    };
+    S.nextRider++;
+    S.riders.push(r);
+    log('gateway', 'POST /rides/book · ' + r.name + ' · ' + st.name + ' → ' + area.name);
+    book(r);
+  }
+  function onApproach(d, st) {
+    if (!up('location')) return;
+    const m = dist(d, st);
+    log('location', 'entered zone · ' + d.name + ' → ' + st.name + ' · ' + Math.round(m) + ' m · ETA ' + (m / 1000 / 20 * 60).toFixed(1) + ' min');
+    S.fx.push({ kind: 'ping', st, until: S.t + 1.6, start: S.t });
+    const waiting = S.riders.filter((r) => r.state === 'waiting' && r.station === st).sort((a, b) => a.born - b.born);
+    if (!waiting.length) return;
+    const pod = callMatching('FindRiders');
+    if (!pod) { log('gateway', 'proximity trigger for ' + d.name + ' but Matching unavailable; will retry on the next station', 'warn'); return; }
+    let n = 0;
+    for (const r of waiting) { if (!eligible(d, r)) break; assign(d, r, pod, 'FindRiders'); n++; }
+    if (!n) log(pod.name, 'FindRiders · ' + d.name + ' is full');
+  }
+
+  // ---------- drivers ----------
+  function moveToward(d, target, dt) {
+    const dx = target.x - d.x, dy = target.y - d.y, len = Math.hypot(dx, dy);
+    const step = SPEED * dt;
+    if (len <= step) { d.x = target.x; d.y = target.y; return true; }
+    d.x += dx / len * step; d.y += dy / len * step;
+    return false;
+  }
+  function tickDriver(d, dt) {
+    if (d.pauseFor > 0) { d.pauseFor -= dt; return; }
+    if (d.mode === 'route') {
+      const st = ST[d.route[d.next]];
+      // approach rings for every remaining stop (an edge, with a little hysteresis)
+      for (let i = d.next; i < d.route.length; i++) {
+        const s = ST[d.route[i]], m = dist(d, s);
+        if (m < ZONE && !d.inZone.has(s.id)) { d.inZone.add(s.id); onApproach(d, s); }
+        else if (m > ZONE + 250) d.inZone.delete(s.id);
+      }
+      if (moveToward(d, st, dt)) {
+        const here = d.assigned.filter((r) => r.station === st);
+        for (const r of here) {
+          r.state = 'riding'; d.onboard.push(r);
+          S.stats.waits.push((S.clock - r.bornClock) / 60);
+          if (S.stats.waits.length > 40) S.stats.waits.shift();
+        }
+        d.assigned = d.assigned.filter((r) => r.station !== st);
+        if (here.length) log('gateway', d.name + ' picked up ' + here.map((r) => r.name).join(', ') + ' at ' + st.name + ' · trip in_progress');
+        d.next++; d.pauseFor = here.length ? 0.6 : 0.2;
+        if (d.next >= d.route.length) d.mode = 'dropoff';
+      }
+    } else if (d.mode === 'dropoff') {
+      if (!d.onboard.length) { d.mode = 'rest'; d.pauseFor = 1.2; return; }
+      const target = d.onboard.reduce((best, r) => (dist(d, r.dest) < dist(d, best.dest) ? r : best), d.onboard[0]);
+      if (moveToward(d, target.dest, dt)) {
+        const off = d.onboard.filter((r) => dist(r.dest, target.dest) < 40);
+        d.onboard = d.onboard.filter((r) => !off.includes(r));
+        for (const r of off) { r.state = 'done'; d.free++; S.stats.done++; }
+        log('gateway', d.name + ' dropped ' + off.map((r) => r.name).join(', ') + ' at ' + target.dest.name + ' · trip completed · seat free', 'good');
+        S.fx.push({ kind: 'drop', at: { x: target.dest.x, y: target.dest.y }, until: S.t + 1.2, start: S.t });
+        d.pauseFor = 0.4;
+      }
+    } else {
+      // rest, then plan the next route (alternate direction)
+      d.routeNo++;
+      const base = ROUTES[d.routeNo % ROUTES.length];
+      d.route = (d.routeNo % 2 ? base.slice().reverse() : base.slice());
+      d.next = 0; d.mode = 'route'; d.free = d.seats; d.inZone.clear();
+      log('gateway', d.name + ' started a trip · ' + d.route.map((id) => ST[id].name).join(' → '));
+    }
+  }
+
+  // ---------- load generator + HPA ----------
+  function tickLoad(dt) {
+    const ready = readyPods();
+    for (const p of S.pods) { p.rate = 0; p.cpu = 0; }
+    let failing = 0;
+    if (S.loadOn && up('gateway') && ready.length) {
+      if (S.lb === 'rr') ready.forEach((p) => { p.rate = LOAD_RATE / ready.length; });
+      else { const p = pickPod(); if (p) p.rate = LOAD_RATE; }
+      for (const p of ready) { p.cpu = Math.min(1, p.rate / POD_CAPACITY); failing += Math.max(0, p.rate - POD_CAPACITY); }
+      S.particleBudget += Math.min(26, LOAD_RATE / 100) * dt;
+      while (S.particleBudget >= 1) {
+        S.particleBudget -= 1;
+        const roll = Math.random() * LOAD_RATE;
+        let acc = 0;
+        for (const p of ready) { acc += p.rate; if (roll <= acc) { spawnParticle(p, false); break; } }
+      }
+    } else if (S.loadOn && up('gateway')) failing = LOAD_RATE;
+    S.stats.err = Math.round(failing);
+    S.cpuAvg = ready.length ? ready.reduce((a, p) => a + p.cpu, 0) / ready.length : 0;
+
+    if (!S.hpaOn) return;
+    S.hpaEvalIn -= dt;
+    if (S.hpaEvalIn > 0) return;
+    S.hpaEvalIn = 2;
+    if (!ready.length) return;
+    const avg = S.cpuAvg * 100;
+    const want = Math.max(1, Math.min(5, Math.ceil(ready.length * avg / 60)));
+    if (want > S.desired) {
+      const to = Math.min(5, Math.min(want, S.desired + 2));
+      log('hpa', 'average CPU ' + Math.round(avg) + '% > 60% target · scale ' + S.desired + ' → ' + to);
+      S.desired = to; S.lowSince = null; syncControls();
+    } else if (want < S.desired) {
+      if (S.lowSince === null) S.lowSince = S.t;
+      if (S.t - S.lowSince >= 10) {
+        log('hpa', 'average CPU ' + Math.round(avg) + '% · scale ' + S.desired + ' → ' + (S.desired - 1));
+        S.desired--; S.lowSince = S.t; syncControls();
+      }
+    } else S.lowSince = null;
+  }
+
+  // ---------- cluster view ----------
+  function renderPods() {
+    const box = $('#pods');
+    box.innerHTML = '';
+    if (!S.pods.length) { const e = document.createElement('div'); e.className = 'pod-empty'; e.textContent = 'no Matching pods'; box.appendChild(e); }
+    for (const p of S.pods) {
+      const el = document.createElement('div');
+      el.className = 'pod ' + p.state;
+      el.innerHTML = '<span class="pod-name"></span><span class="pod-state"></span><span class="pod-bar"><i></i></span>';
+      el.querySelector('.pod-name').textContent = p.name;
+      p.el = el;
+      box.appendChild(el);
+    }
+    updatePods();
+    $('#rep').textContent = S.desired;
+  }
+  function updatePods() {
+    for (const p of S.pods) {
+      if (!p.el) continue;
+      const label = p.state === 'ready'
+        ? (S.loadOn ? Math.round(p.cpu * 100) + '% CPU · ' + Math.round(Math.min(p.rate, POD_CAPACITY)) + '/s' : p.hits + ' decisions')
+        : p.state === 'starting' ? 'starting…' : 'terminating';
+      p.el.querySelector('.pod-state').textContent = label;
+      p.el.querySelector('.pod-bar i').style.width = Math.round(p.cpu * 100) + '%';
+      p.el.classList.toggle('hot', p.state === 'ready' && p.rate > POD_CAPACITY);
+    }
+  }
+  function spawnParticle(pod, booking) {
+    if (reduceMotion || S.particles.length > 80) return;
+    S.particles.push({ pod, t: 0, booking });
+  }
+
+  // ---------- drawing ----------
+  let C = {};
+  function readTokens() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const k of ['--map-bg', '--map-grid', '--fg', '--muted', '--dim', '--yellow', '--yellow-text', '--coral', '--ok', '--line', '--panel-2', '--zone', '--zone-edge', '--bg'])
+      C[k] = cs.getPropertyValue(k).trim();
+    C.mono = cs.getPropertyValue('--font-mono').trim();
+    C.body = cs.getPropertyValue('--font-body').trim();
+  }
+  const mapCv = $('#map'), wireCv = $('#wires');
+  function fit(cv) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+  }
+
+  function drawMap() {
+    const { ctx, w, h } = fit(mapCv);
+    const pad = 28;
+    const k = Math.min((w - pad * 2) / WORLD_W, (h - pad * 2) / WORLD_H);
+    const ox = (w - WORLD_W * k) / 2, oy = (h - WORLD_H * k) / 2;
+    const P = (p) => [ox + p.x * k, oy + p.y * k];
+
+    ctx.fillStyle = C['--map-bg']; ctx.fillRect(0, 0, w, h);
+    // 1 km grid
+    ctx.strokeStyle = C['--map-grid']; ctx.lineWidth = 1;
+    for (let x = 0; x <= WORLD_W; x += 1000) { ctx.beginPath(); ctx.moveTo(ox + x * k, oy); ctx.lineTo(ox + x * k, oy + WORLD_H * k); ctx.stroke(); }
+    for (let y = 0; y <= WORLD_H; y += 1000) { ctx.beginPath(); ctx.moveTo(ox, oy + y * k); ctx.lineTo(ox + WORLD_W * k, oy + y * k); ctx.stroke(); }
+
+    // approach rings
+    for (const s of STATIONS) {
+      const [x, y] = P(s);
+      ctx.beginPath(); ctx.arc(x, y, ZONE * k, 0, Math.PI * 2);
+      ctx.fillStyle = C['--zone']; ctx.fill();
+      ctx.setLineDash([5, 6]); ctx.strokeStyle = C['--zone-edge']; ctx.lineWidth = 1.2; ctx.stroke(); ctx.setLineDash([]);
+    }
+    // metro line (yellow)
+    ctx.strokeStyle = C['--yellow']; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    YELLOW_LINE.forEach((id, i) => { const [x, y] = P(ST[id]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.stroke();
+
+    // ping effects
+    for (const f of S.fx) {
+      if (f.kind === 'ping') {
+        const a = (S.t - f.start) / (f.until - f.start);
+        const [x, y] = P(f.st);
+        ctx.beginPath(); ctx.arc(x, y, ZONE * k * (0.4 + a * 0.7), 0, Math.PI * 2);
+        ctx.strokeStyle = C['--yellow']; ctx.globalAlpha = Math.max(0, 1 - a); ctx.lineWidth = 3; ctx.stroke(); ctx.globalAlpha = 1;
+      } else if (f.kind === 'drop') {
+        const a = (S.t - f.start) / (f.until - f.start);
+        const [x, y] = P(f.at);
+        ctx.beginPath(); ctx.arc(x, y, 6 + a * 18, 0, Math.PI * 2);
+        ctx.strokeStyle = C['--ok']; ctx.globalAlpha = Math.max(0, 1 - a); ctx.lineWidth = 2.5; ctx.stroke(); ctx.globalAlpha = 1;
+      }
+    }
+
+    // drop-off areas of riders on board
+    ctx.fillStyle = C['--dim'];
+    for (const d of S.drivers) for (const r of d.onboard) { const [x, y] = P(r.dest); ctx.fillRect(x - 3, y - 3, 6, 6); }
+
+    // stations
+    ctx.font = '600 12px ' + C.body;
+    for (const s of STATIONS) {
+      const [x, y] = P(s);
+      ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = C['--bg']; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = C['--fg']; ctx.stroke();
+      const waiting = S.riders.filter((r) => r.station === s && (r.state === 'waiting' || r.state === 'matched')).length;
+      const label = s.name + (waiting ? ' · ' + waiting : '');
+      ctx.fillStyle = C['--muted'];
+      const tw = ctx.measureText(label).width;
+      const [dx, dy, align] = s.lab;
+      let lx = align === 'right' ? x + dx - tw : align === 'center' ? x - tw / 2 : x + dx;
+      lx = Math.min(Math.max(lx, 4), w - tw - 4);
+      ctx.fillText(label, lx, y + dy);
+    }
+
+    // match links
+    for (const f of S.fx) if (f.kind === 'link') {
+      const [ax, ay] = P(f.a), [bx, by] = P(f.b);
+      ctx.strokeStyle = C['--yellow']; ctx.lineWidth = 2; ctx.globalAlpha = Math.max(0, (f.until - S.t) / 1.4);
+      ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+
+    // riders
+    for (const r of S.riders) {
+      if (r.state !== 'waiting' && r.state !== 'matched') continue;
+      const [x, y] = P(r);
+      ctx.beginPath(); ctx.arc(x, y, 3.6, 0, Math.PI * 2);
+      ctx.fillStyle = r.state === 'matched' ? C['--yellow'] : C['--fg']; ctx.fill();
+    }
+
+    // drivers
+    ctx.font = '600 11px ' + C.mono;
+    for (const d of S.drivers) {
+      const [x, y] = P(d);
+      if (d.mode === 'route' && d.next < d.route.length) {
+        const [tx, ty] = P(ST[d.route[d.next]]);
+        ctx.strokeStyle = C['--coral']; ctx.globalAlpha = 0.35; ctx.lineWidth = 1.5; ctx.setLineDash([3, 5]);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      }
+      ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = C['--coral']; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = C['--bg']; ctx.stroke();
+      const taken = d.seats - d.free;
+      for (let i = 0; i < d.seats; i++) {
+        ctx.beginPath(); ctx.arc(x - 8 + i * 8, y + 14, 2.6, 0, Math.PI * 2);
+        ctx.fillStyle = i < taken ? C['--yellow'] : C['--line']; ctx.fill();
+      }
+      ctx.fillStyle = C['--fg'];
+      ctx.fillText(d.name, x + 12, y + 4);
+    }
+
+    // scale bar
+    const bar = 2000 * k;
+    ctx.strokeStyle = C['--muted']; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(12, h - 14); ctx.lineTo(12 + bar, h - 14); ctx.stroke();
+    ctx.fillStyle = C['--muted']; ctx.font = '11px ' + C.mono; ctx.fillText('2 km', 14 + bar, h - 10);
+    if (!up('location')) { ctx.fillStyle = C['--coral']; ctx.font = '600 12px ' + C.mono; ctx.fillText('LOCATION DOWN · no approach triggers', 12, 20); }
+    if (!up('gateway')) { ctx.fillStyle = C['--coral']; ctx.font = '600 12px ' + C.mono; ctx.fillText('GATEWAY DOWN · nothing new can happen', 12, 38); }
+  }
+
+  function drawWires(dt) {
+    const { ctx, w, h } = fit(wireCv);
+    ctx.clearRect(0, 0, w, h);
+    const host = $('#cluster').getBoundingClientRect();
+    const g = $('#gw').getBoundingClientRect();
+    const gx = g.right - host.left, gy = g.top + g.height / 2 - host.top;
+    const ends = new Map();
+    for (const p of S.pods) {
+      if (!p.el) continue;
+      const r = p.el.getBoundingClientRect();
+      const end = { x: r.left - host.left, y: r.top + r.height / 2 - host.top };
+      ends.set(p, end);
+      const active = p.state === 'ready' && (S.lb === 'rr' || S.pinned === p || (!S.loadOn && S.lb === 'rr'));
+      ctx.strokeStyle = p.state === 'ready' ? (active ? C['--yellow'] : C['--line']) : C['--line'];
+      ctx.globalAlpha = p.state === 'ready' ? (active ? 0.7 : 0.6) : 0.3;
+      ctx.lineWidth = active ? 2 : 1.2;
+      ctx.setLineDash(active ? [] : [4, 6]);
+      ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(end.x, end.y); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+    for (const q of S.particles) {
+      q.t += dt / 0.7;
+      const e = ends.get(q.pod);
+      if (!e) { q.t = 2; continue; }
+      const x = gx + (e.x - gx) * q.t, y = gy + (e.y - gy) * q.t;
+      ctx.beginPath(); ctx.arc(x, y, q.booking ? 4.5 : 2.6, 0, Math.PI * 2);
+      ctx.fillStyle = q.booking ? C['--yellow'] : C['--fg'];
+      ctx.globalAlpha = q.booking ? 1 : 0.75; ctx.fill(); ctx.globalAlpha = 1;
+    }
+    S.particles = S.particles.filter((q) => q.t < 1);
+  }
+
+  // ---------- narrative + stats ----------
+  function narrative() {
+    const ready = readyPods();
+    if (!up('gateway')) return 'The gateway is down. It is the only door in, so no one can book and no live updates flow, even though every other service is fine. That is our single point of failure.';
+    if (!ready.length) return 'No Matching pod is ready. New bookings get a polite “try again” instead of an error, and rides that were already matched keep moving.';
+    if (S.loadOn && S.lb === 'pin') return 'All load rides one HTTP/2 connection to ' + (S.pinned ? S.pinned.name : 'one pod') + '. The other pods sit idle while ' + S.stats.err.toLocaleString() + ' requests a second fail. The autoscaler only sees the average and thinks things are fine. Switch to the headless Service.';
+    if (S.loadOn && S.hpaOn) return 'The load generator sends ' + LOAD_RATE.toLocaleString() + ' requests a second. The autoscaler sees ' + Math.round(S.cpuAvg * 100) + '% average CPU against a 60% target and asks for ' + S.desired + ' pods. Round robin spreads calls across every ready pod.';
+    if (S.loadOn) return 'The load generator is on but the autoscaler is off: add replicas by hand with + and watch each pod’s share shrink.';
+    if (!up('driver')) return 'The Driver service restarted with empty memory. The gateway keeps serving its last snapshot, then re-registers every driver it knows about.';
+    if (!up('location')) return 'Location is down, so no approach-ring triggers fire. Matching still runs when a rider books, so rides continue, just less cleverly.';
+    if (S.pods.some((p) => p.state === 'terminating' || p.state === 'starting')) return 'A Matching pod is being replaced. Calls skip pods that are not ready, so bookings keep succeeding while Kubernetes starts a new one.';
+    return 'Riders appear at metro stations and book. When a car crosses a station’s 1.5 km ring, Location fires and Matching assigns the riders waiting there. Yellow dots between the gateway and the pods are those decisions.';
+  }
+  let uiIn = 0;
+  function updateUI(dt) {
+    uiIn -= dt;
+    updatePods();
+    if (uiIn > 0) return;
+    uiIn = 0.4;
+    $('#clock').textContent = fmtClock(S.clock) + ' · Bengaluru';
+    $('#st-done').textContent = S.stats.done;
+    $('#st-wait').textContent = S.riders.filter((r) => r.state === 'waiting' || r.state === 'matched').length;
+    const ws = S.stats.waits;
+    $('#st-avg').textContent = ws.length ? (ws.reduce((a, b) => a + b, 0) / ws.length).toFixed(1) + ' min' : '–';
+    $('#st-decided').textContent = S.stats.decided.toLocaleString();
+    $('#st-unavail').textContent = S.stats.unavailable;
+    $('#st-err').textContent = S.stats.err.toLocaleString();
+    $('#load-meta').textContent = S.loadOn ? LOAD_RATE.toLocaleString() + ' req/s offered' : '0 req/s';
+    $('#hpa-meta').textContent = S.hpaOn ? 'avg ' + Math.round(S.cpuAvg * 100) + '% · wants ' + S.desired : 'manual replicas';
+    const now = narrative();
+    if ($('#now').textContent !== now) $('#now').textContent = now;
+  }
+
+  // ---------- main loop ----------
+  function tick(dt) {
+    S.t += dt; S.clock += dt * 30;
+    tickServices();
+    reconcile();
+    if (up('gateway')) {
+      S.spawnIn -= dt;
+      const waiting = S.riders.filter((r) => r.state === 'waiting' || r.state === 'matched').length;
+      if (S.spawnIn <= 0 && waiting < 14) { spawnRider(); S.spawnIn = 1.8 + Math.random() * 1.6; }
+      for (const r of S.riders) if (r.state === 'waiting' && r.retryAt && S.t >= r.retryAt) { r.retryAt = null; book(r); }
+    }
+    for (const r of S.riders) if (r.state === 'waiting' && S.t - r.born > 75) { r.state = 'gone'; log('gateway', r.name + ' gave up waiting at ' + r.station.name + ' and took an auto', 'warn'); }
+    for (const d of S.drivers) tickDriver(d, dt);
+    tickLoad(dt);
+    S.riders = S.riders.filter((r) => r.state !== 'done' && r.state !== 'gone');
+    S.fx = S.fx.filter((f) => f.until > S.t);
+  }
+  let last = performance.now(), tokenIn = 0;
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    tokenIn -= dt;
+    if (tokenIn <= 0) { readTokens(); tokenIn = 1; }
+    if (!S.paused && !document.hidden) tick(dt);
+    drawMap();
+    drawWires(S.paused ? 0 : dt);
+    updateUI(dt);
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- controls ----------
+  function syncControls() {
+    $('#rep').textContent = S.desired;
+    $('#lb-rr').setAttribute('aria-pressed', String(S.lb === 'rr'));
+    $('#lb-pin').setAttribute('aria-pressed', String(S.lb === 'pin'));
+    $('#lb-meta').textContent = S.lb === 'rr' ? 'headless Service · round robin' : 'normal ClusterIP Service · one connection';
+    $('#load').setAttribute('aria-pressed', String(S.loadOn)); $('#load').textContent = S.loadOn ? 'On' : 'Off';
+    $('#hpa').setAttribute('aria-pressed', String(S.hpaOn)); $('#hpa').textContent = S.hpaOn ? 'On' : 'Off';
+    $('#btn-pause').setAttribute('aria-pressed', String(S.paused)); $('#btn-pause').textContent = S.paused ? 'Resume' : 'Pause';
+  }
+  function setReplicas(n, who) {
+    n = Math.max(0, Math.min(5, n));
+    if (n === S.desired) return;
+    log(who || 'kubectl', 'scale deploy/matching --replicas=' + n);
+    S.desired = n; syncControls();
+  }
+  function killPod() {
+    const ready = readyPods();
+    if (!ready.length) return;
+    const victim = S.lb === 'pin' && S.pinned ? S.pinned : ready[Math.floor(Math.random() * ready.length)];
+    log('kubectl', 'delete pod ' + victim.name);
+    terminate(victim, 'killed');
+  }
+  $('#rep-minus').addEventListener('click', () => { S.hpaOn = false; setReplicas(S.desired - 1); syncControls(); });
+  $('#rep-plus').addEventListener('click', () => { S.hpaOn = false; setReplicas(S.desired + 1); syncControls(); });
+  $('#kill-pod').addEventListener('click', killPod);
+  $('#lb-rr').addEventListener('click', () => { if (S.lb !== 'rr') { S.lb = 'rr'; S.pinned = null; log('kubectl', 'apply matching Service: clusterIP None (headless) · clients reconnect and see every pod'); syncControls(); } });
+  $('#lb-pin').addEventListener('click', () => { if (S.lb !== 'pin') { S.lb = 'pin'; log('kubectl', 'apply matching Service: normal ClusterIP · one virtual IP'); syncControls(); } });
+  $('#load').addEventListener('click', () => { S.loadOn = !S.loadOn; log('kubectl', S.loadOn ? 'apply -f k8s/loadgen.yaml' : 'delete -f k8s/loadgen.yaml'); syncControls(); });
+  $('#hpa').addEventListener('click', () => { S.hpaOn = !S.hpaOn; S.hpaEvalIn = 1; log('hpa', S.hpaOn ? 'enabled · min 1 · max 5 · target 60% CPU' : 'disabled'); syncControls(); });
+  $('#btn-pause').addEventListener('click', () => { S.paused = !S.paused; syncControls(); });
+  $('#sc-normal').addEventListener('click', () => { reset(); });
+  $('#sc-kill').addEventListener('click', () => {
+    if (S.loadOn || S.lb !== 'rr') { S.loadOn = false; S.hpaOn = false; S.lb = 'rr'; S.pinned = null; }
+    if (S.desired < 2) setReplicas(3, 'kubectl');
+    syncControls();
+    setTimeout(killPod, readyPods().length ? 0 : 3000);
+  });
+  $('#sc-scale').addEventListener('click', () => {
+    S.lb = 'rr'; S.pinned = null; S.loadOn = true; S.hpaOn = true; S.hpaEvalIn = 1;
+    log('kubectl', 'apply -f k8s/loadgen.yaml · HPA on');
+    setReplicas(1, 'kubectl'); syncControls();
+  });
+  $('#sc-bug').addEventListener('click', () => {
+    S.lb = 'pin'; S.pinned = null; S.loadOn = true; S.hpaOn = true; S.hpaEvalIn = 1;
+    log('kubectl', 'apply normal ClusterIP Service + loadgen · HPA on');
+    setReplicas(1, 'kubectl'); syncControls();
+  });
+  $('#sc-gateway').addEventListener('click', () => killService('gateway'));
+  document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
+    const text = b.getAttribute('data-copy');
+    const done = () => { b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1400); };
+    try {
+      navigator.clipboard.writeText(text).then(done, () => { selectCode(b); });
+    } catch (e) { selectCode(b); }
+  }));
+  function selectCode(b) {
+    const code = b.parentElement.querySelector('code');
+    const range = document.createRange(); range.selectNodeContents(code);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    b.textContent = 'Press Ctrl+C';
+  }
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTokens);
+  new MutationObserver(readTokens).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  reset();
+  readTokens();
+  // Warm up so the first frame already shows a city in motion.
+  for (let i = 0; i < 160; i++) tick(0.05);
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>

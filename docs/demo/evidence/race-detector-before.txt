@@ -1,0 +1,44 @@
+$ go test -race -run TestConcurrentRegistration ./internal/driver/   # before the mutex
+
+==================
+WARNING: DATA RACE
+Write at 0x00c0001aa4b0 by goroutine 18:
+  runtime.mapassign_faststr()
+      /root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.linux-amd64/src/internal/runtime/maps/runtime_faststr_swiss.go:263 +0x0
+  lastmile/internal/driver.(*Server).RegisterDriver()
+      /home/user/LastMile/internal/driver/server.go:52 +0x285
+  lastmile/internal/driver.TestConcurrentRegistration.func1()
+      /home/user/LastMile/internal/driver/server_test.go:67 +0x2cc
+  lastmile/internal/driver.TestConcurrentRegistration.gowrap1()
+      /home/user/LastMile/internal/driver/server_test.go:73 +0x41
+
+Previous write at 0x00c0001aa4b0 by goroutine 12:
+  runtime.mapassign_faststr()
+      /root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.linux-amd64/src/internal/runtime/maps/runtime_faststr_swiss.go:263 +0x0
+  lastmile/internal/driver.(*Server).RegisterDriver()
+      /home/user/LastMile/internal/driver/server.go:52 +0x285
+  lastmile/internal/driver.TestConcurrentRegistration.func1()
+      /home/user/LastMile/internal/driver/server_test.go:67 +0x2cc
+  lastmile/internal/driver.TestConcurrentRegistration.gowrap1()
+      /home/user/LastMile/internal/driver/server_test.go:73 +0x41
+
+Goroutine 18 (running) created at:
+  lastmile/internal/driver.TestConcurrentRegistration()
+      /home/user/LastMile/internal/driver/server_test.go:64 +0x84
+  testing.tRunner()
+      /root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.linux-amd64/src/testing/testing.go:1934 +0x21c
+  testing.(*T).Run.gowrap1()
+      /root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.linux-amd64/src/testing/testing.go:1997 +0x44
+
+Goroutine 12 (running) created at:
+  lastmile/internal/driver.TestConcurrentRegistration()
+      /home/user/LastMile/internal/driver/server_test.go:64 +0x84
+  testing.tRunner()
+      /root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.linux-amd64/src/testing/testing.go:1934 +0x21c
+  testing.(*T).Run.gowrap1()
+      /root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.4.linux-amd64/src/testing/testing.go:1997 +0x44
+==================
+
+... 7 race reports in total, then:
+
+FAIL	lastmile/internal/driver

@@ -1,0 +1,12 @@
+2026/11/23 07:33:07 load: 8 workers -> dns:///matching:50053 (200 drivers per request)
+2026/11/23 07:33:12  2763 req/s  replicas=2  errors=0  served_by  6184a31ef1bc=50%  f38fb0cac673=49%
+2026/11/23 07:33:17  2501 req/s  replicas=2  errors=0  served_by  6184a31ef1bc=50%  f38fb0cac673=50%
+2026/11/23 07:33:22  2686 req/s  replicas=2  errors=0  served_by  6184a31ef1bc=49%  f38fb0cac673=50%
+2026/11/23 07:33:27  2922 req/s  replicas=2  errors=0  served_by  6184a31ef1bc=50%  f38fb0cac673=49%
+2026/11/23 07:33:32  2668 req/s  replicas=2  errors=0  served_by  6184a31ef1bc=49%  f38fb0cac673=50%
+2026/11/23 07:33:37  2761 req/s  replicas=2  errors=0  served_by  6184a31ef1bc=50%  f38fb0cac673=49%
+2026/11/23 07:33:42  2669 req/s  replicas=4  errors=0  served_by  0e31112376a1=23%  6184a31ef1bc=26%  94ac73aa9dab=23%  f38fb0cac673=26%
+2026/11/23 07:33:47  2664 req/s  replicas=4  errors=0  served_by  0e31112376a1=25%  6184a31ef1bc=25%  94ac73aa9dab=25%  f38fb0cac673=24%
+2026/11/23 07:33:52  2642 req/s  replicas=4  errors=0  served_by  0e31112376a1=25%  6184a31ef1bc=24%  94ac73aa9dab=24%  f38fb0cac673=25%
+2026/11/23 07:33:57  2676 req/s  replicas=4  errors=0  served_by  0e31112376a1=25%  6184a31ef1bc=24%  94ac73aa9dab=25%  f38fb0cac673=25%
+2026/11/23 07:34:02  2720 req/s  replicas=4  errors=0  served_by  0e31112376a1=25%  6184a31ef1bc=24%  94ac73aa9dab=25%  f38fb0cac673=24%

@@ -28,7 +28,7 @@ instead of trusting them) found:
 | Finding | How it was proven |
 |---|---|
 | The **Matching service was a stub** returning a hard-coded `rider-456`. All real matching lived in the gateway, so "scale Matching 1→5" scaled nothing. | Read `internal/matching/server.go` |
-| **Data races**: every service stored state in plain maps; gRPC handlers run concurrently. | A 50-goroutine test + `go test -race` → `concurrent map writes` |
+| **Data races**: every service stored state in plain maps; gRPC handlers run concurrently. | A 50-goroutine test + `go test -race` → `WARNING: DATA RACE` on map writes |
 | **Scaling wouldn't spread load**: gRPC over a normal ClusterIP pins every call to one pod. | `TestDefaultClientPinsOnePod`: 300/300 calls hit one replica |
 | The gateway **held its global lock across un-timed gRPC calls**: one slow service froze every request. | Code reading; fixed with deadlines + lock discipline |
 | Location used **San Francisco coordinates** for Bengaluru stations, so the proximity trigger could never fire. | Copy-paste from a template, never exercised |
