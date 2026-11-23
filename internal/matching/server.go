@@ -1,50 +1,71 @@
+// Package matching implements the Matching service: a stateless gRPC service
+// that applies LastMile's matching rules (see rules.go).
 package matching
 
 import (
 	"context"
 	"log/slog"
+	"strings"
+	"time"
 
-	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pb "lastmile/gen/go/matching"
-	tripb "lastmile/gen/go/trip"
 	"lastmile/internal/pkg/logging"
 )
 
-// Server implements the MatchingServiceServer interface.
+// Server is the gRPC adapter around the pure rules in rules.go.
 type Server struct {
 	pb.UnimplementedMatchingServiceServer
-	logger *slog.Logger
+	logger   *slog.Logger
+	instance string
+	now      func() time.Time
 }
 
-// NewServer creates a new Server.
-func NewServer(logger ...*slog.Logger) *Server {
-	l := logging.New("matching")
-	if len(logger) > 0 && logger[0] != nil {
-		l = logger[0]
+// NewServer creates a Matching server. instance names this replica (the pod
+// name in Kubernetes) and is echoed back in every response as served_by.
+func NewServer(logger *slog.Logger, instance string) *Server {
+	if logger == nil {
+		logger = logging.New("matching")
 	}
-
-	return &Server{logger: l}
+	return &Server{logger: logger, instance: instance, now: time.Now}
 }
 
-// Match finds suitable riders for a driver near a station and creates trips.
-func (s *Server) Match(ctx context.Context, req *pb.MatchRequest) (*pb.MatchResponse, error) {
-	// In a real implementation, we would:
-	// 1. Get driver details from the driver service.
-	// 2. Get riders near the station from the rider service.
-	// 3. Find the best matches based on destination, arrival time, etc.
-	// 4. Create trips and store them in the trip service.
-	// 5. Notify the driver and riders.
-
-	// For now, we'll just return a hardcoded trip.
-	trip := &tripb.Trip{
-		Id:       uuid.New().String(),
-		DriverId: req.DriverId,
-		RiderId:  "rider-456", // Hardcoded rider
-		Status:   "pending",
+// RankDrivers answers "a rider just booked: who can take them?".
+func (s *Server) RankDrivers(ctx context.Context, req *pb.RankDriversRequest) (*pb.RankDriversResponse, error) {
+	if req.GetRider() == nil || req.Rider.GetPickupPointId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "rider with pickup_point_id is required")
 	}
+	candidates, rejected := RankDrivers(req.Rider, req.Drivers, s.now())
 
-	s.logger.Info("match triggered", "driverId", req.DriverId, "stationId", req.StationId, "tripId", trip.Id)
+	if !isSynthetic(req.Rider.GetRiderId()) {
+		s.logger.Info("ranked drivers",
+			"riderId", req.Rider.GetRiderId(),
+			"pickup", req.Rider.GetPickupPointId(),
+			"considered", len(req.Drivers),
+			"eligible", len(candidates))
+	}
+	return &pb.RankDriversResponse{Candidates: candidates, Rejections: rejected, ServedBy: s.instance}, nil
+}
 
-	return &pb.MatchResponse{Trips: []*tripb.Trip{trip}}, nil
+// FindRiders answers "a driver is nearly at the station: who should they pick up?".
+func (s *Server) FindRiders(ctx context.Context, req *pb.FindRidersRequest) (*pb.FindRidersResponse, error) {
+	if req.GetDriver() == nil || req.Driver.GetDriverId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "driver with driver_id is required")
+	}
+	riders, rejected := FindRiders(req.Driver, req.Riders, s.now())
+	if !isSynthetic(req.Driver.GetDriverId()) && len(riders) > 0 {
+		s.logger.Info("found riders",
+			"driverId", req.Driver.GetDriverId(),
+			"considered", len(req.Riders),
+			"eligible", len(riders))
+	}
+	return &pb.FindRidersResponse{Riders: riders, Rejections: rejected, ServedBy: s.instance}, nil
+}
+
+// isSynthetic marks load-generator traffic so we don't log thousands of
+// lines per second during the autoscaling demo.
+func isSynthetic(id string) bool {
+	return strings.HasPrefix(id, "load-")
 }

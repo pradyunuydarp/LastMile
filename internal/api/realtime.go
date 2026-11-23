@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -358,7 +359,7 @@ func (h *RealtimeHub) handleDriverResponse(driverID string, payload driverRespon
 	if payload.Accept {
 		delete(h.pending, payload.RiderID)
 		h.mu.Unlock()
-		h.startTripRoom(driverID, queue)
+		h.acceptOffer(driverID, queue)
 		return
 	}
 
@@ -452,7 +453,14 @@ func (h *RealtimeHub) EnqueueRiderRequest(rider Rider, station *Station, pickup 
 	go h.dispatchNext(queue)
 }
 
-func (h *RealtimeHub) startTripRoom(driverID string, queue *pendingQueue) {
+// acceptOffer runs when a driver taps "Accept" on a live offer. It creates the
+// trip (status awaiting_rider) and asks the rider to confirm; the trip room
+// opens only after they approve (see CreateRoomForTrip).
+//
+// The original version also opened the room here and sent the rider an
+// "awaiting_pickup" status, which made the rider's app dismiss the approval
+// prompt it had received a millisecond earlier, so live bookings stalled.
+func (h *RealtimeHub) acceptOffer(driverID string, queue *pendingQueue) {
 	if h.gateway == nil {
 		return
 	}
@@ -462,41 +470,26 @@ func (h *RealtimeHub) startTripRoom(driverID string, queue *pendingQueue) {
 		h.emitToDriver(driverID, "driver:rider-error", map[string]string{
 			"message": err.Error(),
 		})
+		queue.index++
 		go h.dispatchNext(queue)
 		return
 	}
 
-	room := &tripRoom{
-		id:         trip.ID,
-		driverID:   driverID,
-		driverName: queue.attempts[queue.index].DriverName,
-		riderID:    trip.RiderID,
-		riderName:  queue.rider.Name,
-		pickup:     queue.pickup,
-		station:    queue.station,
-		status:     "awaiting_pickup",
-		updatedAt:  time.Now(),
-	}
-	h.mu.Lock()
-	h.rooms[room.id] = room
-	h.mu.Unlock()
-
-	h.joinRoom(driverID, room.id)
-	h.joinRiderRoom(trip.RiderID, room.id)
-
-	payload := tripStatusPayload{
+	h.notifyRiderStatus(trip.RiderID, tripStatusPayload{
 		TripID:     trip.ID,
-		Status:     room.status,
+		Status:     "awaiting_rider",
 		DriverID:   driverID,
 		RiderID:    trip.RiderID,
 		Pickup:     queue.pickup,
 		Station:    queue.station,
 		RecordedAt: time.Now(),
 		Trip:       &trip,
-		Rider:      &queue.rider,
-	}
-	h.emitToDriver(driverID, "trip:room-created", payload)
-	h.notifyRiderStatus(trip.RiderID, payload)
+	})
+	h.emitToDriver(driverID, "driver:awaiting-rider", map[string]string{
+		"tripId":    trip.ID,
+		"riderId":   trip.RiderID,
+		"riderName": queue.rider.Name,
+	})
 }
 
 func (h *RealtimeHub) BroadcastLocation(driverID string, lat, lon float64) {
@@ -652,6 +645,9 @@ func (h *RealtimeHub) RefreshDriverQueue(driverID string) {
 		return
 	}
 	resp, err := h.gateway.driverRequests(driverID)
+	if errors.Is(err, errDriverNotFound) {
+		return // logged in but no route yet: nothing to push
+	}
 	if err != nil {
 		h.logger.Warn("push driver queue failed", "driverId", driverID, "err", err)
 		return
@@ -721,6 +717,17 @@ func (h *RealtimeHub) popApproval(tripID string) *pendingApproval {
 		ctx.timer.Stop()
 	}
 	return ctx
+}
+
+// DriverApproaching tells a driver they are a few minutes from a station on
+// their route. This is the moment matching runs (see onApproachingStation).
+func (h *RealtimeHub) DriverApproaching(driverID, stationID, stationName string, distanceMeters, etaMinutes float64) {
+	h.emitToDriver(driverID, "driver:approaching-station", map[string]any{
+		"stationId":      stationID,
+		"stationName":    stationName,
+		"distanceMeters": int(distanceMeters),
+		"etaMinutes":     etaMinutes,
+	})
 }
 
 func (h *RealtimeHub) NotifyDriverTripCancelled(driverID, tripID, reason string) {

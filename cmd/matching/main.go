@@ -1,46 +1,23 @@
+// Command matching runs the LastMile Matching service.
+//
+// Matching is stateless, so it is the service we scale from 1 to 5 replicas
+// in the Kubernetes demo. Every response says which replica served it.
 package main
 
 import (
-	"log"
-	"net"
 	"os"
 
-	"google.golang.org/grpc"
 	pb "lastmile/gen/go/matching"
 	"lastmile/internal/matching"
-	"lastmile/internal/pkg/logging"
+	"lastmile/internal/pkg/chassis"
 )
 
 func main() {
-	logger := logging.New("matching")
-	addr := getenv("MATCHING_GRPC_ADDR", ":50053")
+	svc := chassis.New("matching")
+	pb.RegisterMatchingServiceServer(svc.GRPC, matching.NewServer(svc.Logger, chassis.Instance()))
 
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		logger.Error("failed to listen", "err", err)
-		log.Fatalf("failed to listen: %v", err)
+	if err := svc.Run(chassis.Getenv("MATCHING_GRPC_ADDR", ":50053")); err != nil {
+		svc.Logger.Error("service stopped", "err", err)
+		os.Exit(1)
 	}
-	logger.Info("matching service listening", "addr", addr)
-
-	// Create a new gRPC server
-	s := grpc.NewServer()
-
-	// Create a new matching server
-	matchingServer := matching.NewServer(logger.With("component", "matching-server"))
-
-	// Register the matching server with the gRPC server
-	pb.RegisterMatchingServiceServer(s, matchingServer)
-
-	// Serve requests
-	if err := s.Serve(lis); err != nil {
-		logger.Error("failed to serve", "err", err)
-		log.Fatalf("failed to serve: %v", err)
-	}
-}
-
-func getenv(key, def string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return def
 }

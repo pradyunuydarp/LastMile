@@ -1,94 +1,38 @@
 package api
 
-// defaultStations returns the canonical list of metro stations and their nearby areas
-// for Electronic City + Outer Ring Road cluster in Bengaluru. The data is intentionally
-// duplicated at runtime instead of sharing references to keep the gateway state mutable
-// without affecting the catalog.
+import (
+	"time"
+
+	"lastmile/internal/catalog"
+)
+
+// defaultStations converts the shared catalog into the gateway's view model.
+// The gateway refreshes this from the Station service at startup (see
+// LoadStations); the catalog is the fallback if that service is down.
 func defaultStations() []Station {
-	return []Station{
-		{
-			ID:          "station-ecity",
-			Name:        "Electronic City",
-			NearbyAreas: []string{"Wipro Gate", "Infosys Gate", "Velankani Tech Park", "Neeladri Road", "Doddathogur Cross", "Singasandra"},
-			LoadFactor:  0.85,
-			Latitude:    12.8456,
-			Longitude:   77.66,
-		},
-		{
-			ID:          "station-konappana",
-			Name:        "Konappana Agrahara",
-			NearbyAreas: []string{"Konappana Bus Stop", "Siemens Campus", "PES IT Junction", "Hosa Road Junction"},
-			LoadFactor:  0.65,
-			Latitude:    12.8519,
-			Longitude:   77.6546,
-		},
-		{
-			ID:          "station-huskur",
-			Name:        "Huskur Road",
-			NearbyAreas: []string{"Huskur Junction", "D Mart Huskur", "Electronic City Phase 2"},
-			LoadFactor:  0.45,
-			Latitude:    12.8209,
-			Longitude:   77.6954,
-		},
-		{
-			ID:          "station-bommasandra",
-			Name:        "Bommasandra",
-			NearbyAreas: []string{"Bommasandra Industrial", "Narayana Health City", "Chandapura Circle", "Attibele Checkpost"},
-			LoadFactor:  0.52,
-			Latitude:    12.8006,
-			Longitude:   77.7003,
-		},
-		{
-			ID:          "station-silkboard",
-			Name:        "Central Silk Board",
-			NearbyAreas: []string{"Silk Board Flyover", "Madiwala Police Station", "Singasandra"},
-			LoadFactor:  0.9,
-			Latitude:    12.9165,
-			Longitude:   77.6238,
-		},
-		{
-			ID:          "station-hsr",
-			Name:        "HSR Layout",
-			NearbyAreas: []string{"HSR 27th Main", "HSR BDA Complex", "Agara Lake", "Kudlu Gate", "Haralur Road"},
-			LoadFactor:  0.7,
-			Latitude:    12.9121,
-			Longitude:   77.6387,
-		},
-		{
-			ID:          "station-btm",
-			Name:        "BTM Layout",
-			NearbyAreas: []string{"BTM 2nd Stage", "Jayadeva Hospital", "Madiwala"},
-			LoadFactor:  0.6,
-			Latitude:    12.9122,
-			Longitude:   77.6092,
-		},
-		{
-			ID:          "station-koramangala",
-			Name:        "Koramangala",
-			NearbyAreas: []string{"Forum Mall", "Sony World", "Ejipura Signal"},
-			LoadFactor:  0.58,
-			Latitude:    12.9345,
-			Longitude:   77.6266,
-		},
-		{
-			ID:          "station-bellandur",
-			Name:        "Bellandur",
-			NearbyAreas: []string{"Bellandur Gate", "Iblur Junction", "Kasavanahalli"},
-			LoadFactor:  0.55,
-			Latitude:    12.9381,
-			Longitude:   77.6951,
-		},
+	src := catalog.Stations()
+	out := make([]Station, 0, len(src))
+	for _, s := range src {
+		out = append(out, Station{
+			ID:          s.ID,
+			Name:        s.Name,
+			NearbyAreas: s.AreaNames(),
+			LoadFactor:  s.LoadFactor,
+			Latitude:    s.Latitude,
+			Longitude:   s.Longitude,
+		})
 	}
+	return out
 }
 
-// defaultPickupPoints returns the metro stations themselves as the only valid pickup points.
-func defaultPickupPoints() []PickupPoint {
-	stations := defaultStations()
+// pickupPointsFor turns stations into pickup points. In LastMile riders are
+// always picked up AT a metro station, so there is one pickup per station.
+func pickupPointsFor(stations []Station) []PickupPoint {
 	points := make([]PickupPoint, 0, len(stations))
 	for _, s := range stations {
 		points = append(points, PickupPoint{
 			ID:          "pickup-" + s.ID,
-			Name:        s.Name + " Metro Station", // Explicit naming
+			Name:        s.Name + " Metro Station",
 			StationID:   s.ID,
 			StationName: s.Name,
 			Latitude:    s.Latitude,
@@ -96,4 +40,45 @@ func defaultPickupPoints() []PickupPoint {
 		})
 	}
 	return points
+}
+
+func defaultPickupPoints() []PickupPoint {
+	return pickupPointsFor(defaultStations())
+}
+
+// seedRiders are "bot" riders already waiting at stations when the gateway
+// starts, so a driver can demo the full flow without a second person. Bots
+// auto-confirm when a driver accepts them.
+func seedRiders(now time.Time) []Rider {
+	mk := func(id, name, stationID, destination string, in time.Duration) Rider {
+		pickupID := "pickup-" + stationID
+		var pickup *PickupPoint
+		for _, p := range defaultPickupPoints() {
+			if p.ID == pickupID {
+				pp := p
+				pickup = &pp
+			}
+		}
+		return Rider{
+			ID: id, Name: name, Destination: destination, ArrivalTime: now.Add(in),
+			StationID: stationID, Status: "waiting", PickupPointID: pickupID, Pickup: pickup, Bot: true,
+		}
+	}
+	return []Rider{
+		mk("bot-rider-meera", "Meera (bot)", "station-ecity", "Wipro Gate", 5*time.Minute),
+		mk("bot-rider-rahul", "Rahul (bot)", "station-konappana", "Siemens Campus", 9*time.Minute),
+		mk("bot-rider-anita", "Anita (bot)", "station-huskur", "D Mart Huskur", 12*time.Minute),
+	}
+}
+
+// dropoffFor returns where a rider should be dropped: their destination area
+// if we know its coordinates, otherwise the station itself.
+func dropoffFor(destination string, fallback *Station) (lat, lon float64, ok bool) {
+	if a, found := catalog.AreaByName(destination); found {
+		return a.Latitude, a.Longitude, true
+	}
+	if fallback != nil {
+		return fallback.Latitude, fallback.Longitude, true
+	}
+	return 0, 0, false
 }

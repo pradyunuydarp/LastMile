@@ -1,9 +1,10 @@
+// Command gateway runs LastMile's API gateway: HTTP + socket.io for the web
+// and mobile apps on one side, gRPC to the microservices on the other.
 package main
 
 import (
 	"bufio"
 	"context"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -16,40 +17,51 @@ import (
 	driverpb "lastmile/gen/go/driver"
 	gatewaypb "lastmile/gen/go/gateway"
 	locationpb "lastmile/gen/go/location"
+	matchingpb "lastmile/gen/go/matching"
+	stationpb "lastmile/gen/go/station"
 	userpb "lastmile/gen/go/user"
 	"lastmile/internal/api"
 	"lastmile/internal/gateway"
+	"lastmile/internal/pkg/chassis"
 	"lastmile/internal/pkg/logging"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
-	logger := logging.New("gateway")
+	logger := logging.New("gateway").With("instance", chassis.Instance())
 
-	locationAddr := getenv("LOCATION_ADDR", ":50054")
-	conn, err := grpc.NewClient(locationAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		logger.Warn("failed to dial location service", "err", err)
+	// Every downstream is dialed through the chassis: lazy connect (services
+	// may start in any order), round_robin across replicas, and retries on
+	// UNAVAILABLE. Targets default to localhost for `make run-local`.
+	targets := map[string]string{
+		"driver":       getenv("DRIVER_ADDR", "localhost:50051"),
+		"user":         getenv("USER_ADDR", "localhost:50052"),
+		"matching":     getenv("MATCHING_ADDR", "localhost:50053"),
+		"location":     getenv("LOCATION_ADDR", "localhost:50054"),
+		"rider":        getenv("RIDER_ADDR", "localhost:50055"),
+		"station":      getenv("STATION_ADDR", "localhost:50056"),
+		"trip":         getenv("TRIP_ADDR", "localhost:50057"),
+		"notification": getenv("NOTIFICATION_ADDR", "localhost:50058"),
 	}
-	locClient := locationpb.NewLocationServiceClient(conn)
-
-	userAddr := getenv("USER_ADDR", ":50052")
-	userConn, err := grpc.NewClient(userAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		logger.Warn("failed to dial user service", "err", err)
+	conns := make(map[string]*grpc.ClientConn, len(targets))
+	for name, target := range targets {
+		conn, err := chassis.Dial(target)
+		if err != nil {
+			logger.Error("invalid service address", "service", name, "target", target, "err", err)
+			os.Exit(1)
+		}
+		defer conn.Close()
+		conns[name] = conn
 	}
-	userClient := userpb.NewUserServiceClient(userConn)
 
-	driverAddr := getenv("DRIVER_ADDR", ":50051")
-	driverConn, err := grpc.NewClient(driverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		logger.Warn("failed to dial driver service", "err", err)
-	}
-	driverClient := driverpb.NewDriverServiceClient(driverConn)
-
-	gw := api.NewGateway(logger.With("component", "gateway-state"), driverClient, locClient, userClient)
+	gw := api.NewGateway(logger.With("component", "gateway-state"),
+		driverpb.NewDriverServiceClient(conns["driver"]),
+		locationpb.NewLocationServiceClient(conns["location"]),
+		userpb.NewUserServiceClient(conns["user"]))
+	gw.AttachMatching(matchingpb.NewMatchingServiceClient(conns["matching"]))
+	gw.AttachStatusChecker(api.NewStatusChecker(chassis.Instance(), conns))
+	go gw.LoadStations(stationpb.NewStationServiceClient(conns["station"]))
 
 	hub := api.NewRealtimeHub(logger.With("component", "realtime-hub"))
 	defer hub.Close()
@@ -71,14 +83,14 @@ func main() {
 	grpcAddr := getenv("GATEWAY_GRPC_ADDR", ":50060")
 	httpAddr := getenv("GATEWAY_HTTP_ADDR", ":8082")
 
-	// gRPC server
+	// gRPC edge (GatewayService) for non-browser clients.
 	grpcServer := grpc.NewServer()
 	gatewaypb.RegisterGatewayServiceServer(grpcServer, gateway.NewServer(gw, logger))
 
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		logger.Error("failed to listen for gRPC", "err", err)
-		log.Fatalf("failed to listen for gRPC: %v", err)
+		os.Exit(1)
 	}
 	go func() {
 		logger.Info("gateway gRPC listening", "addr", grpcAddr)
@@ -87,8 +99,10 @@ func main() {
 		}
 	}()
 
-	// HTTP compatibility for the mobile client (same handlers as before).
+	// HTTP + socket.io for the web and mobile clients.
 	httpMux := http.NewServeMux()
+	httpMux.HandleFunc("/healthz", gw.HealthzHandler)
+	httpMux.HandleFunc("/system/status", gw.SystemStatusHandler)
 	httpMux.HandleFunc("/aggregates/snapshot", gw.SnapshotHandler)
 	httpMux.HandleFunc("/matching/match", gw.MatchHandler)
 	httpMux.HandleFunc("/drivers/requests", gw.DriverRequestsHandler)
@@ -111,7 +125,8 @@ func main() {
 	restHandler := withCORS(requestLogger(logger, httpMux))
 	socketHandler := hub.Handler()
 	httpServer := &http.Server{
-		Addr: httpAddr,
+		Addr:              httpAddr,
+		ReadHeaderTimeout: 10 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/socket.io/") {
 				socketHandler.ServeHTTP(w, r)
@@ -127,13 +142,12 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown on interrupt.
 	waitForShutdown(logger, grpcServer, httpServer)
 }
 
 func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/location/stream" || strings.HasPrefix(r.URL.Path, "/socket.io/") {
+		if r.URL.Path == "/location/stream" || r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/socket.io/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -177,49 +191,6 @@ func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return hj.Hijack()
 	}
 	return nil, nil, http.ErrNotSupported
-}
-
-type socketResponseWriter struct {
-	http.ResponseWriter
-	wrote bool
-}
-
-func (w *socketResponseWriter) Header() http.Header {
-	return w.ResponseWriter.Header()
-}
-
-func (w *socketResponseWriter) WriteHeader(status int) {
-	if w.wrote {
-		return
-	}
-	w.wrote = true
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *socketResponseWriter) Write(b []byte) (int, error) {
-	if !w.wrote {
-		w.WriteHeader(http.StatusOK)
-	}
-	return w.ResponseWriter.Write(b)
-}
-
-func (w *socketResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
-	}
-	return nil, nil, http.ErrNotSupported
-}
-
-func (w *socketResponseWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func setSocketCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, ngrok-skip-browser-warning")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 }
 
 func waitForShutdown(logger *slog.Logger, grpcServer *grpc.Server, httpServer *http.Server) {

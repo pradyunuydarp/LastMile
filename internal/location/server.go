@@ -1,3 +1,6 @@
+// Package location implements the Location service: it ingests live driver
+// GPS updates, fans them out to subscribers, and detects when a driver is
+// approaching a metro station (the trigger for matching).
 package location
 
 import (
@@ -7,68 +10,70 @@ import (
 	"math"
 	"sync"
 
-	pb "lastmile/gen/go/location"
-	"lastmile/gen/go/matching"
-	"lastmile/internal/pkg/logging"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	pb "lastmile/gen/go/location"
+	"lastmile/internal/catalog"
+	"lastmile/internal/pkg/geo"
+	"lastmile/internal/pkg/logging"
 )
+
+// Anchor is a station position used for proximity detection.
+type Anchor struct {
+	ID        string
+	Latitude  float64
+	Longitude float64
+}
 
 // Server implements the LocationServiceServer interface.
 type Server struct {
 	pb.UnimplementedLocationServiceServer
-	logger         *slog.Logger
-	matchingClient matching.MatchingServiceClient
+	logger *slog.Logger
+	radius float64
 
 	mu            sync.RWMutex
+	anchors       []Anchor
 	subscribers   map[string][]chan *pb.LocationUpdate
 	lastLocations map[string]*pb.Location
+	insideZone    map[string]string // driverID -> station zone they are inside
 }
 
-// NewServer creates a new Server.
+// NewServer creates a Location server using the built-in station catalog.
+// Call SetAnchors to replace the stations (e.g. with data from the Station
+// service).
 func NewServer(logger ...*slog.Logger) *Server {
 	l := logging.New("location")
 	if len(logger) > 0 && logger[0] != nil {
 		l = logger[0]
 	}
 
+	anchors := make([]Anchor, 0)
+	for _, s := range catalog.Stations() {
+		anchors = append(anchors, Anchor{ID: s.ID, Latitude: s.Latitude, Longitude: s.Longitude})
+	}
+
 	return &Server{
 		logger:        l,
+		radius:        catalog.ApproachRadiusMeters,
+		anchors:       anchors,
 		subscribers:   make(map[string][]chan *pb.LocationUpdate),
 		lastLocations: make(map[string]*pb.Location),
+		insideZone:    make(map[string]string),
 	}
 }
 
-// NewServerWithMatching allows wiring proximity-triggered matches to the Matching service at targetAddr.
-func NewServerWithMatching(targetAddr string, logger *slog.Logger) *Server {
-	l := logger
-	if l == nil {
-		l = logging.New("location")
+// SetAnchors replaces the stations used for proximity detection.
+func (s *Server) SetAnchors(anchors []Anchor) {
+	if len(anchors) == 0 {
+		return
 	}
-
-	var client matching.MatchingServiceClient
-	if targetAddr != "" {
-		conn, err := grpc.Dial(targetAddr,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
-		)
-		if err == nil {
-			client = matching.NewMatchingServiceClient(conn)
-			l.Info("location matching client enabled", "target", targetAddr)
-		} else {
-			l.Warn("location matching client dial failed", "target", targetAddr, "err", err)
-		}
-	}
-
-	return &Server{
-		logger:         l,
-		matchingClient: client,
-		subscribers:    make(map[string][]chan *pb.LocationUpdate),
-		lastLocations:  make(map[string]*pb.Location),
-	}
+	s.mu.Lock()
+	s.anchors = append([]Anchor(nil), anchors...)
+	s.mu.Unlock()
 }
 
+// GetDriverLocations returns the last known location of each requested driver.
 func (s *Server) GetDriverLocations(ctx context.Context, req *pb.GetDriverLocationsRequest) (*pb.GetDriverLocationsResponse, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -76,59 +81,68 @@ func (s *Server) GetDriverLocations(ctx context.Context, req *pb.GetDriverLocati
 	var locations []*pb.Location
 	for _, id := range req.DriverIds {
 		if loc, ok := s.lastLocations[id]; ok {
-			locations = append(locations, loc)
+			locations = append(locations, &pb.Location{DriverId: loc.DriverId, Latitude: loc.Latitude, Longitude: loc.Longitude})
 		}
 	}
-
-	return &pb.GetDriverLocationsResponse{
-		Locations: locations,
-	}, nil
+	return &pb.GetDriverLocationsResponse{Locations: locations}, nil
 }
 
-// UpdateLocation updates the location of a driver. This is a streaming RPC.
+// UpdateLocation ingests a client stream of location updates. The response
+// carries the proximity result for the last update in the stream.
 func (s *Server) UpdateLocation(stream pb.LocationService_UpdateLocationServer) error {
-	logger := s.logger
-	if logger == nil {
-		logger = logging.New("location")
-	}
-
+	resp := &pb.UpdateLocationResponse{Success: true}
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
-			logger.Info("location stream closed")
-			return stream.SendAndClose(&pb.UpdateLocationResponse{Success: true})
+			return stream.SendAndClose(resp)
 		}
 		if err != nil {
-			logger.Error("location stream failed", "err", err)
 			return err
 		}
-
-		// Broadcast to subscribers
-		s.broadcast(req.Location)
-
-		// Update last location
-		s.mu.Lock()
-		s.lastLocations[req.Location.DriverId] = req.Location
-		s.mu.Unlock()
-
-		logger.Info("location update received",
-			"driverId", req.Location.DriverId,
-			"lat", req.Location.Latitude,
-			"long", req.Location.Longitude)
-
-		if stationID, ok := detectStation(req.Location.Latitude, req.Location.Longitude); ok && s.matchingClient != nil {
-			logger.Info("driver in proximity, triggering match", "driverId", req.Location.DriverId, "stationId", stationID)
-			_, callErr := s.matchingClient.Match(stream.Context(), &matching.MatchRequest{
-				DriverId:  req.Location.DriverId,
-				StationId: stationID,
-			})
-			if callErr != nil {
-				logger.Warn("proximity match failed", "err", callErr)
-			}
+		loc := req.GetLocation()
+		if loc == nil || loc.DriverId == "" {
+			return status.Error(codes.InvalidArgument, "location with driver_id is required")
 		}
+
+		s.broadcast(loc)
+		resp = s.record(loc)
 	}
 }
 
+// record stores the location and runs proximity detection.
+func (s *Server) record(loc *pb.Location) *pb.UpdateLocationResponse {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.lastLocations[loc.DriverId] = &pb.Location{DriverId: loc.DriverId, Latitude: loc.Latitude, Longitude: loc.Longitude}
+
+	nearest, dist := "", math.Inf(1)
+	for _, a := range s.anchors {
+		d := geo.HaversineMeters(loc.Latitude, loc.Longitude, a.Latitude, a.Longitude)
+		if d <= s.radius && d < dist {
+			nearest, dist = a.ID, d
+		}
+	}
+
+	resp := &pb.UpdateLocationResponse{Success: true}
+	previous := s.insideZone[loc.DriverId]
+	if nearest == "" {
+		delete(s.insideZone, loc.DriverId)
+		return resp
+	}
+
+	s.insideZone[loc.DriverId] = nearest
+	resp.NearbyStationId = nearest
+	resp.DistanceToStationMeters = dist
+	resp.EnteredZone = previous != nearest
+	if resp.EnteredZone {
+		s.logger.Info("driver entered station zone",
+			"driverId", loc.DriverId, "stationId", nearest, "distanceMeters", int(dist))
+	}
+	return resp
+}
+
+// SubscribeLocationUpdates streams every future update for one driver.
 func (s *Server) SubscribeLocationUpdates(req *pb.SubscribeLocationRequest, stream pb.LocationService_SubscribeLocationUpdatesServer) error {
 	ch := make(chan *pb.LocationUpdate, 10)
 	driverID := req.DriverId
@@ -137,7 +151,6 @@ func (s *Server) SubscribeLocationUpdates(req *pb.SubscribeLocationRequest, stre
 	s.subscribers[driverID] = append(s.subscribers[driverID], ch)
 	s.mu.Unlock()
 
-	// Cleanup on return
 	defer func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -148,7 +161,9 @@ func (s *Server) SubscribeLocationUpdates(req *pb.SubscribeLocationRequest, stre
 				break
 			}
 		}
-		close(ch)
+		if len(s.subscribers[driverID]) == 0 {
+			delete(s.subscribers, driverID)
+		}
 	}()
 
 	for {
@@ -167,46 +182,11 @@ func (s *Server) broadcast(loc *pb.Location) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	update := &pb.LocationUpdate{
-		DriverId:  loc.DriverId,
-		Latitude:  loc.Latitude,
-		Longitude: loc.Longitude,
-	}
-
 	for _, ch := range s.subscribers[loc.DriverId] {
+		update := &pb.LocationUpdate{DriverId: loc.DriverId, Latitude: loc.Latitude, Longitude: loc.Longitude}
 		select {
 		case ch <- update:
-		default:
-			// Skip if channel is full to avoid blocking
+		default: // slow subscriber: drop rather than block the publisher
 		}
 	}
-}
-
-type coord struct {
-	lat float64
-	lon float64
-}
-
-var stationAnchors = map[string]coord{
-	"station-central": {lat: 37.7936, lon: -122.3965},
-	"station-mission": {lat: 37.7599, lon: -122.4148},
-	"station-sunset":  {lat: 37.7530, lon: -122.4946},
-}
-
-func detectStation(lat, lon float64) (string, bool) {
-	for id, anchor := range stationAnchors {
-		if haversineMeters(lat, lon, anchor.lat, anchor.lon) <= 800 { // ~0.5mi
-			return id, true
-		}
-	}
-	return "", false
-}
-
-func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
-	const R = 6371000.0
-	dLat := (lat2 - lat1) * math.Pi / 180
-	dLon := (lon2 - lon1) * math.Pi / 180
-	a := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(lat1*math.Pi/180)*math.Cos(lat2*math.Pi/180)*math.Sin(dLon/2)*math.Sin(dLon/2)
-	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
-	return R * c
 }

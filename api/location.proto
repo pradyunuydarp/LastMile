@@ -14,8 +14,16 @@ message UpdateLocationRequest {
     Location location = 1;
 }
 
+// The Location service does proximity detection on every update and reports
+// the result for the LAST location in the stream.
 message UpdateLocationResponse {
     bool success = 1;
+    // Station whose approach zone the driver is currently inside (if any).
+    string nearby_station_id = 2;
+    double distance_to_station_meters = 3;
+    // True only on the update where the driver first ENTERED that zone. This
+    // edge is the "driver is a few minutes out, run matching now" trigger.
+    bool entered_zone = 4;
 }
 
 message GetDriverLocationsRequest {

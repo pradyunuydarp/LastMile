@@ -4,10 +4,20 @@ package station;
 
 option go_package = "lastmile/gen/go/station";
 
+// StationService owns metro station metadata: where each station is and
+// which "nearby areas" it serves. It seeds itself from the built-in catalog.
+service StationService {
+  rpc AddStation(AddStationRequest) returns (AddStationResponse);
+  rpc GetStation(GetStationRequest) returns (GetStationResponse);
+  rpc ListStations(ListStationsRequest) returns (ListStationsResponse);
+}
+
 message Station {
   string id = 1;
   string name = 2;
   repeated string nearby_areas = 3;
+  double latitude = 4;
+  double longitude = 5;
 }
 
 message AddStationRequest {
@@ -26,7 +36,8 @@ message GetStationResponse {
   Station station = 1;
 }
 
-service StationService {
-  rpc AddStation(AddStationRequest) returns (AddStationResponse);
-  rpc GetStation(GetStationRequest) returns (GetStationResponse);
+message ListStationsRequest {}
+
+message ListStationsResponse {
+  repeated Station stations = 1;
 }

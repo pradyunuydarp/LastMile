@@ -3,21 +3,26 @@ package rider
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	pb "lastmile/gen/go/rider"
 	"lastmile/internal/pkg/logging"
 )
 
-// Server implements the RiderServiceServer interface.
+// Server implements the RiderServiceServer interface with an in-memory store
+// guarded by mu (gRPC handlers run concurrently).
 type Server struct {
 	pb.UnimplementedRiderServiceServer
+	logger *slog.Logger
+
+	mu     sync.RWMutex
 	riders map[string]*pb.Rider
 	rides  map[string]*pb.Ride
-	logger *slog.Logger
 }
 
 // NewServer creates a new Server.
@@ -37,26 +42,27 @@ func NewServer(logger ...*slog.Logger) *Server {
 // RegisterRider registers a new rider.
 func (s *Server) RegisterRider(ctx context.Context, req *pb.RegisterRiderRequest) (*pb.RegisterRiderResponse, error) {
 	if req.Rider == nil {
-		s.logger.Warn("register rider: missing rider payload")
 		return nil, status.Errorf(codes.InvalidArgument, "rider is required")
 	}
 
-	id := uuid.New().String()
-	req.Rider.Id = id
-	s.riders[id] = req.Rider
-	s.logger.Info("rider registered", "riderId", id, "name", req.Rider.Name)
+	r := proto.Clone(req.Rider).(*pb.Rider)
+	r.Id = uuid.New().String()
 
-	return &pb.RegisterRiderResponse{Id: id}, nil
+	s.mu.Lock()
+	s.riders[r.Id] = r
+	s.mu.Unlock()
+
+	s.logger.Info("rider registered", "riderId", r.Id, "name", r.Name)
+	return &pb.RegisterRiderResponse{Id: r.Id}, nil
 }
 
-// TrackRide tracks the status of a ride.
+// TrackRide returns the status of a ride.
 func (s *Server) TrackRide(ctx context.Context, req *pb.TrackRideRequest) (*pb.TrackRideResponse, error) {
+	s.mu.RLock()
 	ride, ok := s.rides[req.RideId]
+	s.mu.RUnlock()
 	if !ok {
-		s.logger.Warn("ride not found", "rideId", req.RideId)
 		return nil, status.Errorf(codes.NotFound, "ride not found")
 	}
-
-	s.logger.Info("ride status requested", "rideId", req.RideId, "status", ride.Status)
-	return &pb.TrackRideResponse{Ride: ride}, nil
+	return &pb.TrackRideResponse{Ride: proto.Clone(ride).(*pb.Ride)}, nil
 }

@@ -109,3 +109,39 @@ func TestSubscribeLocationUpdates(t *testing.T) {
 
 	pubStream.CloseAndRecv()
 }
+
+func TestProximityDetection(t *testing.T) {
+	s := NewServer()
+	const driver = "driver-proximity"
+
+	// Start at the airport, ~40 km from every station.
+	far := s.record(&pb.Location{DriverId: driver, Latitude: 13.1986, Longitude: 77.7066})
+	assert.Empty(t, far.NearbyStationId, "airport is not near any station")
+	assert.False(t, far.EnteredZone)
+
+	// ~1.4 km south-east of Electronic City station: inside its 1.5 km zone.
+	// (Approach from the south-east because Konappana is only 0.9 km away and
+	// its zone overlaps Electronic City's on the north-west side.)
+	enter := s.record(&pb.Location{DriverId: driver, Latitude: 12.8360, Longitude: 77.6680})
+	assert.True(t, enter.EnteredZone, "first update inside the zone is the trigger")
+	assert.Equal(t, "station-ecity", enter.NearbyStationId)
+
+	// Closer, still inside the same zone: no second trigger.
+	stay := s.record(&pb.Location{DriverId: driver, Latitude: 12.8410, Longitude: 77.6640})
+	assert.Equal(t, "station-ecity", stay.NearbyStationId)
+	assert.False(t, stay.EnteredZone, "staying in the zone must not re-trigger matching")
+	assert.Less(t, stay.DistanceToStationMeters, enter.DistanceToStationMeters)
+}
+
+func TestUpdateLocationRejectsEmptyPayload(t *testing.T) {
+	ctx := context.Background()
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(bufDialer), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	defer conn.Close()
+
+	stream, err := pb.NewLocationServiceClient(conn).UpdateLocation(ctx)
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&pb.UpdateLocationRequest{}))
+	_, err = stream.CloseAndRecv()
+	assert.Error(t, err, "a nil location used to panic the server")
+}

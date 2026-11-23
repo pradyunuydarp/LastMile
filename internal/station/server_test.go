@@ -13,9 +13,7 @@ import (
 )
 
 func TestAddStation(t *testing.T) {
-	s := &Server{
-		stations: make(map[string]*pb.Station),
-	}
+	s := NewServer()
 
 	req := &pb.AddStationRequest{
 		Station: &pb.Station{
@@ -35,9 +33,7 @@ func TestAddStation(t *testing.T) {
 }
 
 func TestGetStation(t *testing.T) {
-	s := &Server{
-		stations: make(map[string]*pb.Station),
-	}
+	s := NewServer()
 
 	// Add a station first
 	addedStation := &pb.Station{
@@ -55,9 +51,7 @@ func TestGetStation(t *testing.T) {
 }
 
 func TestGetStation_NotFound(t *testing.T) {
-	s := &Server{
-		stations: make(map[string]*pb.Station),
-	}
+	s := NewServer()
 
 	req := &pb.GetStationRequest{Id: "non-existent-id"}
 	_, err := s.GetStation(context.Background(), req)
@@ -65,4 +59,22 @@ func TestGetStation_NotFound(t *testing.T) {
 	st, ok := status.FromError(err)
 	require.True(t, ok)
 	assert.Equal(t, codes.NotFound, st.Code())
+}
+
+func TestListStationsIsSeededFromCatalog(t *testing.T) {
+	s := NewServer()
+
+	res, err := s.ListStations(context.Background(), &pb.ListStationsRequest{})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Stations)
+
+	var ecity *pb.Station
+	for _, st := range res.Stations {
+		if st.Id == "station-ecity" {
+			ecity = st
+		}
+	}
+	require.NotNil(t, ecity, "Electronic City should be seeded")
+	assert.InDelta(t, 12.8456, ecity.Latitude, 0.001, "stations must carry real Bengaluru coordinates")
+	assert.Contains(t, ecity.NearbyAreas, "Wipro Gate")
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -18,7 +17,9 @@ import (
 	driverpb "lastmile/gen/go/driver"
 	gatewaypb "lastmile/gen/go/gateway"
 	locationpb "lastmile/gen/go/location"
+	matchingpb "lastmile/gen/go/matching"
 	userpb "lastmile/gen/go/user"
+	"lastmile/internal/pkg/geo"
 
 	"github.com/gorilla/websocket"
 )
@@ -63,6 +64,8 @@ type Rider struct {
 	Status        string       `json:"status"`
 	PickupPointID string       `json:"pickupPointId,omitempty"`
 	Pickup        *PickupPoint `json:"pickup,omitempty"`
+	// Bot riders are seeded demo riders that auto-confirm a driver's offer.
+	Bot bool `json:"bot,omitempty"`
 }
 
 // Trip mirrors the mobile Trip type.
@@ -77,6 +80,7 @@ type Trip struct {
 	ETAMinutes    int          `json:"etaMinutes,omitempty"`
 	Status        string       `json:"status"`
 	CreatedAt     time.Time    `json:"createdAt,omitempty"`
+	PickedUpAt    time.Time    `json:"pickedUpAt,omitempty"`
 	CompletedAt   time.Time    `json:"completedAt,omitempty"`
 	RoomID        string       `json:"roomId,omitempty"`
 }
@@ -90,6 +94,8 @@ type pendingTripContext struct {
 
 type driverPlan struct {
 	DriverID       string
+	Name           string
+	CarDetails     string
 	PickupIDs      []string
 	SeatsTotal     int
 	SeatsAvailable int
@@ -185,6 +191,10 @@ type bookRideResponse struct {
 	RequestedDestination string          `json:"requestedDestination"`
 	Attempts             []driverAttempt `json:"attempts"`
 	Trip                 *Trip           `json:"trip,omitempty"`
+	// Rejections lists drivers the Matching service ruled out, and why.
+	Rejections []driverAttempt `json:"rejections,omitempty"`
+	// MatchedBy is the Matching replica (pod) that answered.
+	MatchedBy string `json:"matchedBy,omitempty"`
 }
 
 type driverRouteRequest struct {
@@ -215,7 +225,12 @@ type driverAcceptRequest struct {
 	RiderID  string `json:"riderId"`
 }
 
-// Gateway holds in-memory data and exposes the HTTP handlers expected by the mobile app.
+// Gateway is LastMile's API gateway / backend-for-frontend: it serves the
+// web and mobile clients over HTTP + socket.io and talks gRPC to the services.
+//
+// Lock discipline: g.mu guards the fields below. Never hold it while making
+// a network call (gRPC, Postgres, push) — a slow downstream would freeze
+// every request in the gateway. Copy what you need, unlock, then call.
 type Gateway struct {
 	mu             sync.Mutex
 	logger         *slog.Logger
@@ -228,10 +243,27 @@ type Gateway struct {
 	driverClient   driverpb.DriverServiceClient
 	locationClient locationpb.LocationServiceClient
 	userClient     userpb.UserServiceClient
+	matchingClient matchingpb.MatchingServiceClient
 	hub            *RealtimeHub
 	store          *Persistence
 	pendingTrips   map[string]*pendingTripContext
 	pushTokens     map[string]string
+
+	// lastPos caches every driver's last reported position, so a Location
+	// service restart doesn't wipe drivers off the map.
+	lastPos map[string][2]float64
+	// lastMatchedBy / matchedByCount record which Matching replicas answered.
+	lastMatchedBy  string
+	matchedByCount map[string]int
+	// driverServiceUp is false while the Driver service is unreachable; the
+	// snapshot is then served from the last good copy.
+	driverServiceUp bool
+	statusChecker   *StatusChecker
+
+	// Simulation pacing (shortened in tests).
+	simTick       time.Duration
+	simStopPause  time.Duration
+	simPickupWait time.Duration
 }
 
 func NewGateway(logger *slog.Logger, driverClient driverpb.DriverServiceClient, locClient locationpb.LocationServiceClient, userClient userpb.UserServiceClient) *Gateway {
@@ -240,70 +272,27 @@ func NewGateway(logger *slog.Logger, driverClient driverpb.DriverServiceClient, 
 		l = logger
 	}
 
-	now := time.Now()
 	stations := defaultStations()
-	pickups := defaultPickupPoints()
-
-	findPickup := func(name string) *PickupPoint {
-		for i := range pickups {
-			if strings.EqualFold(pickups[i].Name, name) {
-				pp := pickups[i]
-				return &pp
-			}
-		}
-		return nil
-	}
-
-	// Hardcoded riders and trips for demo purposes (can be replaced later)
-	ensure := func(candidate *PickupPoint, fallbackIdx int) *PickupPoint {
-		if candidate != nil {
-			copyVal := *candidate
-			return &copyVal
-		}
-		if fallbackIdx >= 0 && fallbackIdx < len(pickups) {
-			pp := pickups[fallbackIdx]
-			return &pp
-		}
-		return &PickupPoint{}
-	}
-
-	r1 := ensure(findPickup("Wipro Gate"), 0)
-	r2 := ensure(findPickup("Siemens Campus"), 9)
-	r3 := ensure(findPickup("D Mart Huskur"), 12)
-	riders := []Rider{
-		{ID: "rider-priya", Name: "Priya Sharma", Destination: r1.Name, ArrivalTime: now.Add(5 * time.Minute), StationID: r1.StationID, Status: "waiting", PickupPointID: r1.ID, Pickup: r1},
-		{ID: "rider-rahul", Name: "Rahul Verma", Destination: r2.Name, ArrivalTime: now.Add(9 * time.Minute), StationID: r2.StationID, Status: "waiting", PickupPointID: r2.ID, Pickup: r2},
-		{ID: "rider-anita", Name: "Anita Desai", Destination: r3.Name, ArrivalTime: now.Add(12 * time.Minute), StationID: r3.StationID, Status: "matched", PickupPointID: r3.ID, Pickup: r3},
-	}
-
-	trips := []Trip{
-		{
-			ID:            "trip-1",
-			DriverID:      "driver-ramesh",
-			RiderID:       "rider-priya",
-			StationID:     r1.StationID,
-			Destination:   r1.StationName,
-			PickupPoint:   r1,
-			PickupPointID: r1.ID,
-			ETAMinutes:    5,
-			Status:        "pending",
-			CreatedAt:     now.Add(-2 * time.Minute),
-		},
-	}
 
 	return &Gateway{
-		logger:         l.With("component", "gateway"),
-		drivers:        []Driver{}, // Drivers will be fetched dynamically
-		riders:         riders,
-		trips:          trips,
-		stations:       stations,
-		pickupPoints:   pickups,
-		driverPlans:    make(map[string]*driverPlan),
-		driverClient:   driverClient,
-		locationClient: locClient,
-		userClient:     userClient,
-		pendingTrips:   make(map[string]*pendingTripContext),
-		pushTokens:     make(map[string]string),
+		logger:          l.With("component", "gateway"),
+		drivers:         []Driver{}, // refreshed from the Driver service
+		riders:          seedRiders(time.Now()),
+		trips:           []Trip{},
+		stations:        stations,
+		pickupPoints:    pickupPointsFor(stations),
+		driverPlans:     make(map[string]*driverPlan),
+		driverClient:    driverClient,
+		locationClient:  locClient,
+		userClient:      userClient,
+		pendingTrips:    make(map[string]*pendingTripContext),
+		pushTokens:      make(map[string]string),
+		lastPos:         make(map[string][2]float64),
+		matchedByCount:  make(map[string]int),
+		driverServiceUp: true,
+		simTick:         700 * time.Millisecond,
+		simStopPause:    2 * time.Second,
+		simPickupWait:   20 * time.Second,
 	}
 }
 
@@ -322,90 +311,181 @@ func (g *Gateway) AttachStore(store *Persistence) {
 	g.store = store
 }
 
+// refreshDrivers pulls driver profiles from the Driver service and positions
+// from the Location service, then rebuilds g.drivers.
+//
+// Both calls happen WITHOUT holding g.mu and with a short deadline. The
+// original version held the gateway-wide lock across an un-timed gRPC call,
+// so one slow Driver pod froze every HTTP request in the system.
+func (g *Gateway) refreshDrivers() {
+	if g.driverClient == nil {
+		g.refreshFromPlansOnly()
+		return
+	}
+
+	var profiles []*driverpb.Driver
+	var routes []*driverpb.Route
+	driverUp := false
+
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	resp, err := g.driverClient.ListDrivers(ctx, &driverpb.ListDriversRequest{})
+	cancel()
+	if err != nil {
+		g.logger.Warn("driver service unavailable; serving cached drivers", "err", err)
+	} else {
+		profiles, routes, driverUp = resp.Drivers, resp.Routes, true
+	}
+
+	g.mu.Lock()
+	g.driverServiceUp = driverUp
+	if !driverUp {
+		g.mu.Unlock()
+		return // keep the last good g.drivers
+	}
+
+	ids := make([]string, 0, len(profiles))
+	for _, d := range profiles {
+		ids = append(ids, d.Id)
+	}
+	g.mu.Unlock()
+
+	locMap := make(map[string]*locationpb.Location)
+	if g.locationClient != nil && len(ids) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+		locResp, err := g.locationClient.GetDriverLocations(ctx, &locationpb.GetDriverLocationsRequest{DriverIds: ids})
+		cancel()
+		if err != nil {
+			g.logger.Warn("location service unavailable; using cached positions", "err", err)
+		} else {
+			for _, loc := range locResp.Locations {
+				locMap[loc.DriverId] = loc
+			}
+		}
+	}
+
+	g.mu.Lock()
+	routeByDriver := make(map[string]*driverpb.Route)
+	for _, r := range routes {
+		routeByDriver[r.DriverId] = r
+	}
+
+	seen := make(map[string]bool, len(profiles))
+	drivers := make([]Driver, 0, len(profiles))
+	for _, d := range profiles {
+		seen[d.Id] = true
+		lat, lon := 0.0, 0.0
+		if loc, ok := locMap[d.Id]; ok {
+			lat, lon = loc.Latitude, loc.Longitude
+		}
+		drivers = append(drivers, g.driverViewLocked(d.Id, d.Name, d.CarDetails, routeByDriver[d.Id], lat, lon))
+	}
+
+	// Self-healing: the Driver service keeps state in memory, so if its pod
+	// restarts it forgets everyone. Drivers we still have plans for are kept
+	// visible and re-registered in the background.
+	var orphans []*driverPlan
+	for id, plan := range g.driverPlans {
+		if seen[id] {
+			continue
+		}
+		drivers = append(drivers, g.driverViewLocked(id, plan.Name, plan.CarDetails, nil, 0, 0))
+		cp := *plan
+		orphans = append(orphans, &cp)
+	}
+	sort.Slice(drivers, func(i, j int) bool { return drivers[i].ID < drivers[j].ID })
+	g.drivers = drivers
+	g.mu.Unlock()
+
+	for _, plan := range orphans {
+		g.logger.Info("re-registering driver lost by Driver service", "driverId", plan.DriverID)
+		go g.ensureDriverProfile(driverRouteRequest{DriverID: plan.DriverID, Name: plan.Name, CarDetails: plan.CarDetails},
+			plan.TargetStations, plan.Destination, plan.SeatsTotal)
+	}
+}
+
+// refreshFromPlansOnly is used when no Driver service is wired (unit tests,
+// standalone runs): keep the drivers we have, refresh their plan-derived
+// fields, and add any driver that only exists as a plan.
+func (g *Gateway) refreshFromPlansOnly() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	have := make(map[string]bool, len(g.drivers))
+	for i, d := range g.drivers {
+		have[d.ID] = true
+		if _, ok := g.driverPlans[d.ID]; ok {
+			g.drivers[i] = g.driverViewLocked(d.ID, d.Name, d.CarDetails, nil, d.Latitude, d.Longitude)
+		}
+	}
+	for id, plan := range g.driverPlans {
+		if !have[id] {
+			g.drivers = append(g.drivers, g.driverViewLocked(id, plan.Name, plan.CarDetails, nil, 0, 0))
+		}
+	}
+}
+
+// driverViewLocked merges a driver profile with the gateway's trip plan.
+func (g *Gateway) driverViewLocked(id, name, car string, route *driverpb.Route, lat, lon float64) Driver {
+	view := Route{}
+	seats := 0
+	if plan := g.driverPlans[id]; plan != nil {
+		view = Route{
+			ID:               plan.DriverID,
+			TargetStationIDs: append([]string{}, plan.TargetStations...),
+			Destination:      plan.Destination,
+			PickupPoints:     g.pickupPointsForIDs(plan.PickupIDs),
+		}
+		seats = plan.SeatsAvailable
+		if name == "" {
+			name = plan.Name
+		}
+	} else if route != nil {
+		view = Route{
+			ID:               route.Id,
+			TargetStationIDs: append([]string{}, route.TargetStationIds...),
+			Destination:      route.Destination,
+		}
+		seats = int(route.AvailableSeats)
+	}
+	if view.Destination == "" {
+		view.Destination = "Unknown"
+	}
+	if name == "" {
+		name = "Driver"
+	}
+	if plat, plon, ok := g.positionLocked(id, lat, lon); ok {
+		lat, lon = plat, plon
+	}
+	status := "idle"
+	if plan := g.driverPlans[id]; plan != nil && plan.Active {
+		status = "active"
+	}
+	return Driver{
+		ID: id, Name: name, CarDetails: car, SeatsAvailable: seats, ETAMinutes: 5,
+		Status: status, Route: view, Latitude: lat, Longitude: lon,
+	}
+}
+
+// positionLocked prefers a fresh position, falling back to the gateway cache.
+func (g *Gateway) positionLocked(driverID string, lat, lon float64) (float64, float64, bool) {
+	if geo.Known(lat, lon) {
+		return lat, lon, true
+	}
+	if p, ok := g.lastPos[driverID]; ok {
+		return p[0], p[1], true
+	}
+	return 0, 0, false
+}
+
 func (g *Gateway) snapshot() BackendSnapshot {
+	g.refreshDrivers()
+
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	metrics := g.metrics()
 	var highlight *Trip
 	if len(g.trips) > 0 {
-		highlight = &g.trips[0]
-	}
-
-	if g.driverClient != nil {
-		resp, err := g.driverClient.ListDrivers(context.Background(), &driverpb.ListDriversRequest{})
-		if err != nil {
-			g.logger.Error("failed to list drivers", "err", err)
-		} else {
-			routeByDriver := make(map[string]*driverpb.Route)
-			for _, r := range resp.Routes {
-				routeByDriver[r.DriverId] = r
-			}
-
-			g.drivers = make([]Driver, 0, len(resp.Drivers))
-			driverIDs := make([]string, 0, len(resp.Drivers))
-			for _, d := range resp.Drivers {
-				driverIDs = append(driverIDs, d.Id)
-			}
-
-			locMap := make(map[string]*locationpb.Location)
-			if g.locationClient != nil && len(driverIDs) > 0 {
-				locResp, err := g.locationClient.GetDriverLocations(context.Background(), &locationpb.GetDriverLocationsRequest{DriverIds: driverIDs})
-				if err != nil {
-					g.logger.Error("failed to get driver locations", "err", err)
-				} else {
-					for _, loc := range locResp.Locations {
-						locMap[loc.DriverId] = loc
-					}
-				}
-			}
-
-			for _, d := range resp.Drivers {
-				plan := g.driverPlans[d.Id]
-				route := Route{}
-				seats := 0
-				if plan != nil {
-					route = Route{
-						ID:               plan.DriverID,
-						TargetStationIDs: append([]string{}, plan.TargetStations...),
-						Destination:      plan.Destination,
-						PickupPoints:     g.pickupPointsForIDs(plan.PickupIDs),
-					}
-					seats = plan.SeatsAvailable
-					if seats == 0 {
-						seats = plan.SeatsTotal
-					}
-				} else if r := routeByDriver[d.Id]; r != nil {
-					route = Route{
-						ID:               r.Id,
-						TargetStationIDs: append([]string{}, r.TargetStationIds...),
-						Destination:      r.Destination,
-					}
-					seats = int(r.AvailableSeats)
-				}
-
-				if route.Destination == "" {
-					route.Destination = "Unknown"
-				}
-
-				lat, lon := 0.0, 0.0
-				if loc, ok := locMap[d.Id]; ok {
-					lat, lon = loc.Latitude, loc.Longitude
-				}
-
-				g.drivers = append(g.drivers, Driver{
-					ID:             d.Id,
-					Name:           d.Name,
-					CarDetails:     d.CarDetails,
-					SeatsAvailable: seats,
-					ETAMinutes:     5,
-					Status:         "active",
-					Route:          route,
-					Latitude:       lat,
-					Longitude:      lon,
-				})
-			}
-		}
+		t := *copyTrip(&g.trips[0])
+		highlight = &t
 	}
 
 	return BackendSnapshot{
@@ -413,7 +493,7 @@ func (g *Gateway) snapshot() BackendSnapshot {
 		Riders:        append([]Rider{}, g.riders...),
 		Trips:         append([]Trip{}, g.trips...),
 		Stations:      append([]Station{}, g.stations...),
-		Metrics:       metrics,
+		Metrics:       g.metrics(),
 		HighlightTrip: highlight,
 		LastUpdated:   time.Now().UTC(),
 	}
@@ -579,72 +659,91 @@ func (g *Gateway) TriggerMatchProto(driverID, stationID string) (*gatewaypb.Gate
 	return toProtoTrip(trip), nil
 }
 
+// driverRequests lists the waiting riders this driver can pick up. The
+// decision is made by the Matching service (FindRiders), so the driver's
+// queue and the rider's booking always apply the same rules.
 func (g *Gateway) driverRequests(driverID string) (driverRequestsResponse, error) {
-	g.snapshot()
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.refreshDrivers()
 
+	g.mu.Lock()
 	driver, err := g.findDriver(driverID, "")
 	if err != nil {
+		g.mu.Unlock()
 		return driverRequestsResponse{}, err
 	}
-
-	stationName := ""
-	if len(driver.Route.TargetStationIDs) > 0 {
-		if station, ok := g.stationByID(driver.Route.TargetStationIDs[0]); ok {
-			stationName = station.Name
-		} else {
-			stationName = driver.Route.TargetStationIDs[0]
-		}
+	state := g.driverStateLocked(driver)
+	summary := driverSummary{
+		ID:             driver.ID,
+		Name:           driver.Name,
+		SeatsAvailable: int(state.SeatsAvailable),
+		NextStop:       g.nextStopNameLocked(driver),
 	}
 
-	requests := make([]riderRequestView, 0)
-
+	byID := make(map[string]Rider)
+	riderReqs := make([]*matchingpb.RiderRequest, 0)
 	for i := range g.riders {
-		rider := g.riders[i]
-		if rider.Status == "picked_up" {
+		r := &g.riders[i]
+		if r.Status != "waiting" {
 			continue
 		}
-		if !routeContains(driver.Route.TargetStationIDs, rider.StationID) {
-			continue
-		}
-		station, ok := g.stationByID(rider.StationID)
+		byID[r.ID] = copyRider(r)
+		riderReqs = append(riderReqs, riderRequestFor(r))
+	}
+	g.mu.Unlock()
+
+	out := driverRequestsResponse{Driver: summary, Requests: []riderRequestView{}, GeneratedAt: time.Now().UTC()}
+	if len(riderReqs) == 0 {
+		return out, nil
+	}
+
+	found, err := g.findRiders(state, riderReqs)
+	if err != nil {
+		return out, err
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, c := range found.Riders {
+		r, ok := byID[c.RiderId]
 		if !ok {
 			continue
 		}
-		pickup := rider.Pickup
-		if pickup == nil && rider.PickupPointID != "" {
-			if pp, found := g.pickupByID(rider.PickupPointID); found {
-				pickup = pp
-			}
+		station, ok := g.stationByID(r.StationID)
+		if !ok {
+			continue
 		}
-		distance := driverDistanceToPickup(driver, pickup, station)
-		requests = append(requests, riderRequestView{
-			ID:             rider.ID,
-			Name:           rider.Name,
-			Destination:    rider.Destination,
-			ArrivalTime:    rider.ArrivalTime,
+		pickup := r.Pickup
+		if pickup == nil && r.PickupPointID != "" {
+			pickup, _ = g.pickupByID(r.PickupPointID)
+		}
+		out.Requests = append(out.Requests, riderRequestView{
+			ID:             r.ID,
+			Name:           r.Name,
+			Destination:    r.Destination,
+			ArrivalTime:    r.ArrivalTime,
 			Station:        *station,
 			Pickup:         pickup,
-			Status:         rider.Status,
-			DistanceMeters: distance,
+			Status:         r.Status,
+			DistanceMeters: c.DistanceMeters,
 		})
 	}
+	return out, nil
+}
 
-	sort.Slice(requests, func(i, j int) bool {
-		return requests[i].ArrivalTime.Before(requests[j].ArrivalTime)
-	})
-
-	return driverRequestsResponse{
-		Driver: driverSummary{
-			ID:             driver.ID,
-			Name:           driver.Name,
-			SeatsAvailable: driver.SeatsAvailable,
-			NextStop:       stationName,
-		},
-		Requests:    requests,
-		GeneratedAt: time.Now().UTC(),
-	}, nil
+// nextStopNameLocked names the next pickup on the driver's plan.
+func (g *Gateway) nextStopNameLocked(d *Driver) string {
+	if plan, ok := g.driverPlans[d.ID]; ok && plan.CurrentIndex < len(plan.PickupIDs) {
+		if pp, ok := g.pickupByID(plan.PickupIDs[plan.CurrentIndex]); ok {
+			return pp.StationName
+		}
+	}
+	if len(d.Route.TargetStationIDs) > 0 {
+		if st, ok := g.stationByID(d.Route.TargetStationIDs[0]); ok {
+			return st.Name
+		}
+		return d.Route.TargetStationIDs[0]
+	}
+	return ""
 }
 
 func (g *Gateway) bookRide(payload bookRideRequest) (bookRideResponse, error) {
@@ -653,7 +752,9 @@ func (g *Gateway) bookRide(payload bookRideRequest) (bookRideResponse, error) {
 		return bookRideResponse{}, fmt.Errorf("unsupported command '%s'", payload.Command)
 	}
 
+	g.mu.Lock()
 	station, pickup, inferredArea, err := g.resolveStation(payload)
+	g.mu.Unlock()
 	if err != nil {
 		return bookRideResponse{}, err
 	}
@@ -673,12 +774,20 @@ func (g *Gateway) bookRide(payload bookRideRequest) (bookRideResponse, error) {
 		name = "Guest Rider"
 	}
 
+	g.refreshDrivers()
+
 	g.mu.Lock()
 	rider := g.upsertRiderLocked(payload.RiderID, name, station, requestedDestination, pickup)
-	candidates := g.driverCandidatesLocked(station, pickup)
+	riderReq := riderRequestFor(rider)
+	states := make([]*matchingpb.DriverState, 0, len(g.drivers))
+	names := make(map[string]string, len(g.drivers))
+	for i := range g.drivers {
+		states = append(states, g.driverStateLocked(&g.drivers[i]))
+		names[g.drivers[i].ID] = g.drivers[i].Name
+	}
+	riderSnapshot := copyRider(rider)
 	g.mu.Unlock()
 
-	riderSnapshot := copyRider(rider)
 	stationCopy := copyStation(station)
 	pickupCopy := copyPickupPoint(pickup)
 
@@ -686,15 +795,35 @@ func (g *Gateway) bookRide(payload bookRideRequest) (bookRideResponse, error) {
 		go g.store.RecordRiderRequest(riderSnapshot, pickupCopy, "waiting")
 	}
 
-	attempts := make([]driverAttempt, len(candidates))
-	copy(attempts, candidates)
+	// Ask the Matching service who can take this rider.
+	ranked, err := g.rankDrivers(riderReq, states)
+	if err != nil {
+		return bookRideResponse{
+			Status:               "matching_unavailable",
+			Message:              "Matching is busy right now. You're on the list; try again in a few seconds.",
+			Rider:                riderSnapshot,
+			Station:              *station,
+			Pickup:               pickupCopy,
+			RequestedDestination: requestedDestination,
+			Attempts:             []driverAttempt{},
+		}, nil
+	}
+
+	attempts := make([]driverAttempt, 0, len(ranked.Candidates))
+	for _, c := range ranked.Candidates {
+		attempts = append(attempts, driverAttempt{DriverID: c.DriverId, DriverName: c.Name, DistanceMeters: c.DistanceMeters})
+	}
+	rejections := make([]driverAttempt, 0, len(ranked.Rejections))
+	for _, r := range ranked.Rejections {
+		rejections = append(rejections, driverAttempt{DriverID: r.Id, DriverName: names[r.Id], Reason: r.Reason, DistanceMeters: -1})
+	}
 
 	var trip *Trip
 	var acceptedIndex = -1
 
 	if g.hub == nil {
 		for i := range attempts {
-			result, err := g.createTripForRider(attempts[i].DriverID, station.ID, rider.ID)
+			result, err := g.createTripForRider(attempts[i].DriverID, station.ID, riderSnapshot.ID)
 			if err != nil {
 				attempts[i].Reason = err.Error()
 				continue
@@ -711,6 +840,9 @@ func (g *Gateway) bookRide(payload bookRideRequest) (bookRideResponse, error) {
 
 	status := "queued"
 	message := fmt.Sprintf("No drivers available near %s yet", station.Name)
+	if len(rejections) > 0 {
+		message += fmt.Sprintf(" (%d ruled out, e.g. %s: %s)", len(rejections), rejections[0].DriverName, rejections[0].Reason)
+	}
 	if trip != nil && acceptedIndex >= 0 {
 		status = "awaiting_rider"
 		message = fmt.Sprintf("%s accepted. Confirm from your Riders tab.", attempts[acceptedIndex].DriverName)
@@ -727,6 +859,8 @@ func (g *Gateway) bookRide(payload bookRideRequest) (bookRideResponse, error) {
 		RequestedDestination: requestedDestination,
 		Attempts:             attempts,
 		Trip:                 trip,
+		Rejections:           rejections,
+		MatchedBy:            ranked.GetServedBy(),
 	}, nil
 }
 
@@ -854,8 +988,11 @@ func (g *Gateway) findDriver(driverID, stationID string) (*Driver, error) {
 		}
 		return nil, fmt.Errorf("driver '%s' is not routed to station '%s'", driverID, stationID)
 	}
-	return nil, fmt.Errorf("driver '%s' not found", driverID)
+	return nil, fmt.Errorf("driver '%s': %w", driverID, errDriverNotFound)
 }
+
+// errDriverNotFound means the driver hasn't planned a route yet.
+var errDriverNotFound = errors.New("driver not found (plan a route first)")
 
 func (g *Gateway) findRider(stationID, destination string) (*Rider, error) {
 	for i := range g.riders {
@@ -927,23 +1064,6 @@ func (g *Gateway) riderStationID(riderID string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("rider '%s' not found", riderID)
-}
-
-func driverDistance(driver *Driver, station *Station) float64 {
-	if driver == nil || station == nil {
-		return math.MaxFloat64
-	}
-	if (driver.Latitude == 0 && driver.Longitude == 0) || (station.Latitude == 0 && station.Longitude == 0) {
-		return math.MaxFloat64
-	}
-	return haversineMeters(driver.Latitude, driver.Longitude, station.Latitude, station.Longitude)
-}
-
-func driverDistanceToPickup(driver *Driver, pickup *PickupPoint, fallbackStation *Station) float64 {
-	if pickup != nil && pickup.Latitude != 0 && pickup.Longitude != 0 {
-		return haversineMeters(driver.Latitude, driver.Longitude, pickup.Latitude, pickup.Longitude)
-	}
-	return driverDistance(driver, fallbackStation)
 }
 
 func (g *Gateway) resolveStation(payload bookRideRequest) (*Station, *PickupPoint, string, error) {
@@ -1047,42 +1167,6 @@ func (g *Gateway) upsertRiderLocked(riderID, name string, station *Station, dest
 	return &g.riders[0]
 }
 
-func (g *Gateway) driverCandidatesLocked(station *Station, pickup *PickupPoint) []driverAttempt {
-	if pickup == nil {
-		return nil
-	}
-	attempts := make([]driverAttempt, 0, len(g.drivers))
-	for i := range g.drivers {
-		driver := &g.drivers[i]
-		if station != nil && !routeContains(driver.Route.TargetStationIDs, station.ID) {
-			continue
-		}
-		if plan, ok := g.driverPlans[driver.ID]; ok {
-			if !plan.Active {
-				continue
-			}
-			idx := indexOf(plan.PickupIDs, pickup.ID)
-			if idx == -1 || idx < plan.CurrentIndex {
-				continue
-			}
-			if plan.SeatsAvailable <= 0 {
-				continue
-			}
-		} else if driver.SeatsAvailable <= 0 {
-			continue
-		}
-		attempts = append(attempts, driverAttempt{
-			DriverID:       driver.ID,
-			DriverName:     driver.Name,
-			DistanceMeters: driverDistanceToPickup(driver, pickup, station),
-		})
-	}
-	sort.Slice(attempts, func(i, j int) bool {
-		return attempts[i].DistanceMeters < attempts[j].DistanceMeters
-	})
-	return attempts
-}
-
 func indexOf(items []string, target string) int {
 	for i, item := range items {
 		if item == target {
@@ -1120,16 +1204,7 @@ func (g *Gateway) matchPickupByText(text string) *PickupPoint {
 }
 
 func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
-	const earthRadius = 6371000.0
-	lat1Rad := lat1 * math.Pi / 180
-	lat2Rad := lat2 * math.Pi / 180
-	deltaLat := (lat2 - lat1) * math.Pi / 180
-	deltaLon := (lon2 - lon1) * math.Pi / 180
-
-	a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
-		math.Cos(lat1Rad)*math.Cos(lat2Rad)*math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
-	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
-	return earthRadius * c
+	return geo.HaversineMeters(lat1, lon1, lat2, lon2)
 }
 
 // SnapshotHandler returns the current snapshot expected by the mobile app.
@@ -1185,6 +1260,10 @@ func (g *Gateway) DriverRequestsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	result, err := g.driverRequests(driverID)
+	if errors.Is(err, errMatchingUnavailable) {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -1240,10 +1319,10 @@ func (g *Gateway) acceptTripFromRealtime(driverID, riderID string) (Trip, error)
 	return trip, nil
 }
 
+// completeTrip marks a trip as dropped off and frees the seat. It is
+// idempotent: completing an already-completed trip is a no-op.
 func (g *Gateway) completeTrip(tripID string) (*Trip, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-
 	var completed *Trip
 	for i := range g.trips {
 		if g.trips[i].ID == tripID {
@@ -1252,33 +1331,34 @@ func (g *Gateway) completeTrip(tripID string) (*Trip, error) {
 		}
 	}
 	if completed == nil {
+		g.mu.Unlock()
 		return nil, fmt.Errorf("trip '%s' not found", tripID)
 	}
 	if completed.Status == "completed" {
-		return completed, nil
+		out := copyTrip(completed)
+		g.mu.Unlock()
+		return out, nil
 	}
 
 	completed.Status = "completed"
 	completed.CompletedAt = time.Now().UTC()
-
+	g.setRiderStatusLocked(completed.RiderID, "completed")
 	if driver, err := g.findDriver(completed.DriverID, ""); err == nil {
 		driver.SeatsAvailable++
 	}
-
-	if plan, ok := g.driverPlans[completed.DriverID]; ok {
-		if plan.SeatsAvailable < plan.SeatsTotal {
-			plan.SeatsAvailable++
-		}
+	if plan, ok := g.driverPlans[completed.DriverID]; ok && plan.SeatsAvailable < plan.SeatsTotal {
+		plan.SeatsAvailable++
 	}
+	out := copyTrip(completed)
+	g.mu.Unlock()
 
+	// Database writes happen after unlocking (never do I/O under g.mu).
 	if g.store != nil {
-		g.store.RecordTrip(*completed)
-		g.store.RecordTripEvent(tripID, "completed", map[string]any{
-			"riderId": completed.RiderID,
-		})
-		g.store.UpdateRiderRequestStatus(completed.RiderID, "completed", completed.DriverID, tripID)
+		g.store.RecordTrip(*out)
+		g.store.RecordTripEvent(tripID, "completed", map[string]any{"riderId": out.RiderID})
+		g.store.UpdateRiderRequestStatus(out.RiderID, "completed", out.DriverID, tripID)
 	}
-	return completed, nil
+	return out, nil
 }
 
 func (g *Gateway) BookRideHandler(w http.ResponseWriter, r *http.Request) {
@@ -1307,9 +1387,12 @@ func (g *Gateway) PickupPointsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	g.mu.Lock()
+	points := append([]PickupPoint(nil), g.pickupPoints...)
+	g.mu.Unlock()
 	response := struct {
 		PickupPoints []PickupPoint `json:"pickupPoints"`
-	}{PickupPoints: g.pickupPoints}
+	}{PickupPoints: points}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -1527,12 +1610,12 @@ func (g *Gateway) afterTripFinalized(trip Trip, rider *Rider, pickup *PickupPoin
 func (g *Gateway) queueRiderApproval(trip Trip) {
 	rider := g.riderSnapshot(trip.RiderID)
 	pickupCopy := copyPickupPoint(trip.PickupPoint)
+
+	g.mu.Lock()
 	var stationCopy *Station
 	if station, ok := g.stationByID(trip.StationID); ok {
 		stationCopy = copyStation(station)
 	}
-
-	g.mu.Lock()
 	g.pendingTrips[trip.ID] = &pendingTripContext{Trip: trip, Rider: rider, Pickup: pickupCopy, Station: stationCopy}
 	g.mu.Unlock()
 
@@ -1541,7 +1624,7 @@ func (g *Gateway) queueRiderApproval(trip Trip) {
 		"driverId": trip.DriverID,
 	})
 
-	if g.hub != nil && rider != nil {
+	if g.hub != nil && rider != nil && !rider.Bot {
 		g.hub.RequestRiderApproval(trip, pickupCopy, stationCopy, rider)
 		return
 	}
@@ -1646,11 +1729,22 @@ func (g *Gateway) CancelTrip(tripID, reason string) error {
 }
 
 func (g *Gateway) publishDriverLocation(driverID string, lat, lon float64) {
+	g.mu.Lock()
+	g.lastPos[driverID] = [2]float64{lat, lon}
+	for i := range g.drivers {
+		if g.drivers[i].ID == driverID {
+			g.drivers[i].Latitude, g.drivers[i].Longitude = lat, lon
+		}
+	}
+	g.mu.Unlock()
 	if g.hub != nil {
 		g.hub.BroadcastLocation(driverID, lat, lon)
 	}
 }
 
+// handlePickupCheckpoint marks every confirmed trip at this pickup as
+// picked up. (It used to stop after the first one, stranding any second
+// rider waiting at the same station.)
 func (g *Gateway) handlePickupCheckpoint(driverID string, pickup *PickupPoint) {
 	if pickup == nil {
 		return
@@ -1660,22 +1754,30 @@ func (g *Gateway) handlePickupCheckpoint(driverID string, pickup *PickupPoint) {
 		g.hub.PickupArrived(driverID, pickup.ID)
 	}
 
-	var tripCopy *Trip
+	var picked []Trip
 	g.mu.Lock()
+	now := time.Now().UTC()
 	for i := range g.trips {
 		trip := &g.trips[i]
 		if trip.DriverID == driverID && trip.PickupPointID == pickup.ID && trip.Status == "pending" {
 			trip.Status = "in_progress"
-			trip.CreatedAt = time.Now().UTC()
-			tripCopy = copyTrip(trip)
-			break
+			trip.PickedUpAt = now
+			picked = append(picked, *copyTrip(trip))
+			for j := range g.riders {
+				if g.riders[j].ID == trip.RiderID {
+					g.riders[j].Status = "picked_up"
+				}
+			}
 		}
 	}
 	g.mu.Unlock()
 
-	if tripCopy != nil && g.store != nil {
-		g.store.RecordTrip(*tripCopy)
-		g.store.RecordTripEvent(tripCopy.ID, "pickup_reached", map[string]any{"pickupId": pickup.ID})
+	for _, t := range picked {
+		g.logger.Info("rider picked up", "tripId", t.ID, "riderId", t.RiderID, "pickup", pickup.ID)
+		if g.store != nil {
+			g.store.RecordTrip(t)
+			g.store.RecordTripEvent(t.ID, "pickup_reached", map[string]any{"pickupId": pickup.ID})
+		}
 	}
 }
 
@@ -1687,11 +1789,15 @@ func (g *Gateway) maybeCompleteTrips(driverID string, lat, lon float64) {
 		if trip.DriverID != driverID || trip.Status != "in_progress" {
 			continue
 		}
-		station, ok := g.stationByID(trip.StationID)
+		station, _ := g.stationByID(trip.StationID)
+		dropLat, dropLon, ok := dropoffFor(trip.Destination, station)
 		if !ok {
 			continue
 		}
-		if haversineMeters(lat, lon, station.Latitude, station.Longitude) <= 150 {
+		// Drop-off is at the rider's DESTINATION. (The original code checked
+		// the pickup station, so every trip "completed" the instant the rider
+		// got in.)
+		if haversineMeters(lat, lon, dropLat, dropLon) <= 150 {
 			trip.Status = "completed"
 			trip.CompletedAt = time.Now().UTC()
 			if driver, err := g.findDriver(driverID, ""); err == nil {
@@ -1700,6 +1806,8 @@ func (g *Gateway) maybeCompleteTrips(driverID string, lat, lon float64) {
 			if plan, ok := g.driverPlans[driverID]; ok && plan.SeatsAvailable < plan.SeatsTotal {
 				plan.SeatsAvailable++
 			}
+			g.setRiderStatusLocked(trip.RiderID, "completed")
+			g.logger.Info("rider dropped off", "tripId", trip.ID, "riderId", trip.RiderID, "destination", trip.Destination)
 			completed = append(completed, *trip)
 		}
 	}
@@ -1713,6 +1821,14 @@ func (g *Gateway) maybeCompleteTrips(driverID string, lat, lon float64) {
 		}
 		if g.hub != nil {
 			g.hub.CompleteTrip(trip.ID, "auto-complete")
+		}
+	}
+}
+
+func (g *Gateway) setRiderStatusLocked(riderID, status string) {
+	for i := range g.riders {
+		if g.riders[i].ID == riderID {
+			g.riders[i].Status = status
 		}
 	}
 }
@@ -1881,42 +1997,23 @@ func (g *Gateway) UpdateLocationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	stream, err := g.locationClient.UpdateLocation(r.Context())
-	if err != nil {
-		g.logger.Error("failed to start location update stream", "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if strings.TrimSpace(req.DriverID) == "" {
+		http.Error(w, "driverId required", http.StatusBadRequest)
+		return
+	}
+	if req.Latitude < -90 || req.Latitude > 90 || req.Longitude < -180 || req.Longitude > 180 {
+		http.Error(w, "latitude/longitude out of range", http.StatusBadRequest)
 		return
 	}
 
-	err = stream.Send(&locationpb.UpdateLocationRequest{
-		Location: &locationpb.Location{
-			DriverId:  req.DriverID,
-			Latitude:  req.Latitude,
-			Longitude: req.Longitude,
-		},
-	})
-	if err != nil {
-		g.logger.Error("failed to send location update", "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	passed := g.recordDriverLocationProgress(req.DriverID, req.Latitude, req.Longitude)
-
-	// Close and receive response
-	_, err = stream.CloseAndRecv()
-	if err != nil {
-		g.logger.Error("failed to close location update stream", "err", err)
-		// Don't fail the request if we sent the update successfully
-	}
-
-	g.publishDriverLocation(req.DriverID, req.Latitude, req.Longitude)
-	if passed != nil {
-		g.handlePickupCheckpoint(req.DriverID, passed)
-	}
+	// Same path as simulated pings: Location service, realtime fan-out,
+	// pickup/drop-off checkpoints and the proximity trigger.
+	g.ingestLocation(r.Context(), req.DriverID, req.Latitude, req.Longitude)
 	w.WriteHeader(http.StatusOK)
 }
 
+// TripPickupHandler lets the driver confirm a pickup by hand ("rider is in
+// the car"). For simulated trips the car jumps to the pickup and carries on.
 func (g *Gateway) TripPickupHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1928,70 +2025,72 @@ func (g *Gateway) TripPickupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Everything is read and written under one lock, via the slice index.
+	// (The old code kept a *Trip into g.trips across unlock/relock; any
+	// append in between reallocates the slice, so the write went to a stale
+	// copy and the pickup was silently lost.)
 	g.mu.Lock()
-	var targetTrip *Trip
+	idx := -1
 	for i := range g.trips {
 		if g.trips[i].ID == tripID {
-			targetTrip = &g.trips[i]
+			idx = i
 			break
 		}
 	}
-	g.mu.Unlock()
-
-	if targetTrip == nil {
+	if idx < 0 {
+		g.mu.Unlock()
 		http.Error(w, "trip not found", http.StatusNotFound)
 		return
 	}
-
-	if targetTrip.Status == "pending" || targetTrip.Status == "awaiting_pickup" {
-		// Advance to in_progress
-		if g.hub != nil {
-			g.hub.PickupArrived(targetTrip.DriverID, targetTrip.PickupPointID)
-		}
-
-		// Warp Driver to Pickup Location
-		g.mu.Lock()
-		pickup, ok := g.pickupByID(targetTrip.PickupPointID)
-		driverID := targetTrip.DriverID
-		plan, hasPlan := g.driverPlans[driverID]
+	trip := &g.trips[idx]
+	switch trip.Status {
+	case "pending", "awaiting_pickup", "in_progress":
+	default:
+		status := trip.Status
 		g.mu.Unlock()
+		http.Error(w, fmt.Sprintf("trip is %s", status), http.StatusConflict)
+		return
+	}
+	alreadyPicked := trip.Status == "in_progress"
+	trip.Status = "in_progress"
+	if trip.PickedUpAt.IsZero() {
+		trip.PickedUpAt = time.Now().UTC()
+	}
+	tripCopy := *copyTrip(trip)
+	pickup, hasPickup := g.pickupByID(trip.PickupPointID)
 
-		if ok {
-			g.publishDriverLocation(driverID, pickup.Latitude, pickup.Longitude)
+	var simCtx context.Context
+	var remaining []PickupPoint
+	if plan, ok := g.driverPlans[trip.DriverID]; ok && plan.Simulated && !alreadyPicked {
+		if plan.simCancel != nil {
+			plan.simCancel()
+		}
+		var cancel context.CancelFunc
+		simCtx, cancel = context.WithCancel(context.Background())
+		plan.simCancel = cancel
+		// Skip past this pickup, then continue the rest of the plan.
+		if i := indexOf(plan.PickupIDs, trip.PickupPointID); i >= plan.CurrentIndex {
+			plan.CurrentIndex = i + 1
+		}
+		remaining = g.pickupPointsForIDs(plan.PickupIDs[min(plan.CurrentIndex, len(plan.PickupIDs)):])
+	}
+	g.mu.Unlock()
 
-			// Resume Simulation from Pickup -> Dropoff (Destination)
-			if hasPlan && plan.Simulated {
-				g.mu.Lock()
-				// Cancel existing sim
-				if plan.simCancel != nil {
-					plan.simCancel()
-				}
-
-				// Setup new sim to Destination
-				destCoords := getDestinationCoords(targetTrip.Destination)
-				if destCoords != nil {
-					simCtx, cancel := context.WithCancel(context.Background())
-					plan.simCancel = cancel
-					// We simulate TO destination.
-					// We treat destination as a single waypoint.
-					waypoints := []PickupPoint{*destCoords}
-					g.mu.Unlock()
-					go g.runSimulatedTrip(simCtx, driverID, waypoints)
-				} else {
-					g.mu.Unlock()
-					// Fallback: If no coords, maybe just stop sim?
-					// Or try to simulate to target stations?
-					// For now, stop sim is safer than random movement.
-				}
-			}
+	if !alreadyPicked {
+		if g.hub != nil {
+			g.hub.PickupArrived(tripCopy.DriverID, tripCopy.PickupPointID)
+		}
+		if hasPickup {
+			g.publishDriverLocation(tripCopy.DriverID, pickup.Latitude, pickup.Longitude)
+		}
+		if g.store != nil {
+			g.store.RecordTrip(tripCopy)
+			g.store.RecordTripEvent(tripCopy.ID, "pickup_confirmed", map[string]any{"pickupId": tripCopy.PickupPointID})
 		}
 	}
-
-	// Also update local state
-	g.mu.Lock()
-	targetTrip.Status = "in_progress"
-	targetTrip.CreatedAt = time.Now().UTC()
-	g.mu.Unlock()
+	if simCtx != nil {
+		go g.runSimulatedTrip(simCtx, tripCopy.DriverID, remaining)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "picked_up"})
 }
@@ -2082,46 +2181,4 @@ func (g *Gateway) SimulateTripHandler(w http.ResponseWriter, r *http.Request) {
 	go g.runSimulatedTrip(simCtx, driverID, pickups)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "simulation_started"})
-}
-
-var knownDestinations = map[string]PickupPoint{
-	"Wipro Gate":              {Latitude: 12.8467, Longitude: 77.6624},
-	"Infosys Gate":            {Latitude: 12.8459, Longitude: 77.6666},
-	"Velankani Tech Park":     {Latitude: 12.8449, Longitude: 77.6615},
-	"Neeladri Road":           {Latitude: 12.8442, Longitude: 77.6574},
-	"Doddathogur Cross":       {Latitude: 12.8365, Longitude: 77.6642},
-	"Singasandra":             {Latitude: 12.884, Longitude: 77.654},
-	"Kudlu Gate":              {Latitude: 12.8936, Longitude: 77.6513},
-	"Hosa Road Junction":      {Latitude: 12.8721, Longitude: 77.6647},
-	"Konappana Bus Stop":      {Latitude: 12.8513, Longitude: 77.6541},
-	"Siemens Campus":          {Latitude: 12.8553, Longitude: 77.6515},
-	"PES IT Junction":         {Latitude: 12.8581, Longitude: 77.6493},
-	"Huskur Junction":         {Latitude: 12.8188, Longitude: 77.6924},
-	"D Mart Huskur":           {Latitude: 12.817, Longitude: 77.6972},
-	"Electronic City Phase 2": {Latitude: 12.8149, Longitude: 77.6968},
-	"Bommasandra Industrial":  {Latitude: 12.8019, Longitude: 77.7018},
-	"Narayana Health City":    {Latitude: 12.8008, Longitude: 77.6846},
-	"Chandapura Circle":       {Latitude: 12.8011, Longitude: 77.7039},
-	"Attibele Checkpost":      {Latitude: 12.7842, Longitude: 77.7721},
-	"Silk Board Flyover":      {Latitude: 12.916, Longitude: 77.6239},
-	"Madiwala Police Station": {Latitude: 12.9188, Longitude: 77.6176},
-	"HSR 27th Main":           {Latitude: 12.9082, Longitude: 77.6475},
-	"HSR BDA Complex":         {Latitude: 12.9129, Longitude: 77.6382},
-	"Agara Lake":              {Latitude: 12.9215, Longitude: 77.651},
-	"BTM 2nd Stage":           {Latitude: 12.9169, Longitude: 77.6105},
-	"Jayadeva Hospital":       {Latitude: 12.9189, Longitude: 77.5956},
-	"Forum Mall":              {Latitude: 12.9349, Longitude: 77.6113},
-	"Sony World Junction":     {Latitude: 12.9353, Longitude: 77.6393},
-	"Ejipura Signal":          {Latitude: 12.9304, Longitude: 77.626},
-	"Bellandur Gate":          {Latitude: 12.9378, Longitude: 77.679},
-	"Iblur Junction":          {Latitude: 12.9248, Longitude: 77.6773},
-	"Haralur Road":            {Latitude: 12.9004, Longitude: 77.6492},
-}
-
-func getDestinationCoords(name string) *PickupPoint {
-	if p, ok := knownDestinations[name]; ok {
-		return &p
-	}
-	// Fallback to Electronic City if unknown? Or nil.
-	return nil
 }

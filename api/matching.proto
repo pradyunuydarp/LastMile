@@ -2,19 +2,97 @@ syntax = "proto3";
 
 package matching;
 
-import "api/trip.proto";
-
 option go_package = "lastmile/gen/go/matching";
 
-message MatchRequest {
-  string driver_id = 1;
-  string station_id = 2;
-}
-
-message MatchResponse {
-  repeated trip.Trip trips = 1;
-}
-
+// MatchingService decides who can ride with whom.
+//
+// It is deliberately STATELESS: every request carries the facts needed to
+// decide, and the service stores nothing. That is what lets us scale it from
+// 1 to 5 replicas (or kill one) without anyone noticing: any replica can
+// answer any request.
+//
+// The same rules are applied from both directions:
+//   - RankDrivers: a rider just booked. Which drivers can take them, best first?
+//   - FindRiders:  a driver is approaching a station. Which waiting riders fit?
 service MatchingService {
-  rpc Match(MatchRequest) returns (MatchResponse);
+  rpc RankDrivers(RankDriversRequest) returns (RankDriversResponse);
+  rpc FindRiders(FindRidersRequest) returns (FindRidersResponse);
+}
+
+message GeoPoint {
+  double latitude = 1;
+  double longitude = 2;
+}
+
+// DriverState is a snapshot of one driver's planned trip.
+message DriverState {
+  string driver_id = 1;
+  string name = 2;
+  // Ordered pickup points (metro stations) on the driver's planned route.
+  repeated string pickup_point_ids = 3;
+  // Pickups before this index have already been passed.
+  int32 next_pickup_index = 4;
+  int32 seats_available = 5;
+  // Where the driver is heading. Empty or "unknown" means "anywhere".
+  string destination = 6;
+  // Last known position; omitted if unknown.
+  GeoPoint position = 7;
+  // True once the driver has pressed "Start trip".
+  bool trip_active = 8;
+}
+
+// RiderRequest is one rider waiting at a metro station.
+message RiderRequest {
+  string rider_id = 1;
+  string name = 2;
+  string pickup_point_id = 3;
+  string station_id = 4;
+  string destination = 5;
+  GeoPoint pickup = 6;
+  // When the rider's metro arrives at the station (unix seconds).
+  int64 arrival_unix = 7;
+}
+
+// Rejection explains why a pairing was ruled out. Great for debugging and
+// for showing students the rules in action.
+message Rejection {
+  string id = 1;
+  string reason = 2;
+}
+
+message RankDriversRequest {
+  RiderRequest rider = 1;
+  repeated DriverState drivers = 2;
+}
+
+message DriverCandidate {
+  string driver_id = 1;
+  string name = 2;
+  double distance_meters = 3;
+  double eta_minutes = 4;
+}
+
+message RankDriversResponse {
+  // Eligible drivers, best (closest) first.
+  repeated DriverCandidate candidates = 1;
+  repeated Rejection rejections = 2;
+  // Which replica answered (pod name in Kubernetes).
+  string served_by = 3;
+}
+
+message FindRidersRequest {
+  DriverState driver = 1;
+  repeated RiderRequest riders = 2;
+}
+
+message RiderCandidate {
+  string rider_id = 1;
+  double distance_meters = 2;
+}
+
+message FindRidersResponse {
+  // Eligible riders, earliest metro arrival first.
+  repeated RiderCandidate riders = 1;
+  repeated Rejection rejections = 2;
+  string served_by = 3;
 }

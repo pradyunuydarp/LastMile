@@ -4,6 +4,9 @@ import (
 	"context"
 	"log/slog"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	pb "lastmile/gen/go/notification"
 	"lastmile/internal/pkg/logging"
 )
@@ -26,6 +29,9 @@ func NewServer(logger ...*slog.Logger) *Server {
 
 // SendNotification sends a notification to a user.
 func (s *Server) SendNotification(ctx context.Context, req *pb.SendNotificationRequest) (*pb.SendNotificationResponse, error) {
+	if req.GetNotification() == nil || req.Notification.GetUserId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "notification with user_id is required")
+	}
 	s.logger.Info("sending notification", "userId", req.Notification.UserId, "notificationId", req.Notification.Id)
 	// In a real implementation, this would connect to a push notification service (e.g., FCM, APNS)
 	// or a real-time messaging service (e.g., WebSockets, gRPC streams).

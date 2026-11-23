@@ -10,6 +10,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/nedpals/supabase-go v0.5.0
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/crypto v0.43.0
 	google.golang.org/grpc v1.77.0
 	google.golang.org/protobuf v1.36.10
 )
@@ -26,7 +27,6 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/net v0.46.1-0.20251013234738-63d1a5100f82 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect

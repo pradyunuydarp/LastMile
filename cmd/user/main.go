@@ -1,44 +1,30 @@
+// Command user runs the LastMile User service (profiles + authentication).
 package main
 
 import (
-	"log"
-	"net"
 	"os"
 
-	pb "lastmile/gen/go/user"
-	"lastmile/internal/pkg/logging"
-	"lastmile/internal/user"
-
 	"github.com/joho/godotenv"
-	"google.golang.org/grpc"
+
+	pb "lastmile/gen/go/user"
+	"lastmile/internal/pkg/chassis"
+	"lastmile/internal/user"
 )
 
 func main() {
-	_ = godotenv.Load(".env.development")
-	logger := logging.New("user")
-	addr := os.Getenv("USER_GRPC_ADDR")
-	if addr == "" {
-		addr = ":50052"
+	_ = godotenv.Load(".env.development") // optional local overrides
+	svc := chassis.New("user")
+
+	server := user.NewServer(os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY"), svc.Logger)
+	if server.DemoMode() {
+		svc.Logger.Warn("SUPABASE_URL/SUPABASE_KEY not set: using in-memory demo accounts",
+			"accounts", "driver@lastmile.demo, rider@lastmile.demo (+driver2, rider2)",
+			"password", user.DemoPassword)
 	}
+	pb.RegisterUserServiceServer(svc.GRPC, server)
 
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		logger.Error("failed to listen", "err", err)
-		log.Fatalf("failed to listen: %v", err)
-	}
-	logger.Info("user service listening", "addr", addr)
-
-	supabaseURL := os.Getenv("SUPABASE_URL")
-	supabaseKey := os.Getenv("SUPABASE_KEY")
-	if supabaseURL == "" || supabaseKey == "" {
-		logger.Warn("SUPABASE_URL or SUPABASE_KEY not set, persistence will be disabled")
-	}
-
-	s := grpc.NewServer()
-	pb.RegisterUserServiceServer(s, user.NewServer(supabaseURL, supabaseKey, logger.With("component", "user-server")))
-
-	if err := s.Serve(lis); err != nil {
-		logger.Error("failed to serve", "err", err)
-		log.Fatalf("failed to serve: %v", err)
+	if err := svc.Run(chassis.Getenv("USER_GRPC_ADDR", ":50052")); err != nil {
+		svc.Logger.Error("service stopped", "err", err)
+		os.Exit(1)
 	}
 }
