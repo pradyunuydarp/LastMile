@@ -1,0 +1,101 @@
+# LastMile without Kubernetes: every service in its own container.
+#
+#   docker compose up --build                     # whole system
+#   docker compose up --build --scale matching=3  # three Matching replicas
+#   open http://localhost:8080                    # web app
+#   curl localhost:8082/system/status             # who is up, who served matches
+#
+# Docker's embedded DNS returns one IP per replica for "matching", exactly
+# like a headless Kubernetes Service, so the gateway's round_robin balancer
+# spreads calls across all of them. Try `docker compose stop matching` or
+# `docker kill lastmile-matching-2` mid-demo.
+
+x-go-service: &go-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+
+services:
+  station:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: station}}
+    image: pradyunuydarp/lastmile-station:latest
+
+  driver:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: driver}}
+    image: pradyunuydarp/lastmile-driver:latest
+
+  rider:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: rider}}
+    image: pradyunuydarp/lastmile-rider:latest
+
+  trip:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: trip}}
+    image: pradyunuydarp/lastmile-trip:latest
+
+  notification:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: notification}}
+    image: pradyunuydarp/lastmile-notification:latest
+
+  user:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: user}}
+    image: pradyunuydarp/lastmile-user:latest
+    environment:
+      # Leave empty for in-memory demo accounts; set both to use Supabase.
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_KEY: ${SUPABASE_KEY:-}
+
+  location:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: location}}
+    image: pradyunuydarp/lastmile-location:latest
+    environment:
+      STATION_ADDR: station:50056
+
+  matching:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: matching}}
+    image: pradyunuydarp/lastmile-matching:latest
+
+  gateway:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: gateway}}
+    image: pradyunuydarp/lastmile-gateway:latest
+    environment:
+      DRIVER_ADDR: driver:50051
+      USER_ADDR: user:50052
+      MATCHING_ADDR: dns:///matching:50053
+      LOCATION_ADDR: location:50054
+      RIDER_ADDR: rider:50055
+      STATION_ADDR: station:50056
+      TRIP_ADDR: trip:50057
+      NOTIFICATION_ADDR: notification:50058
+      POD_NAME: gateway
+    ports:
+      - "8082:8082"
+    depends_on: [station, driver, user, location, matching]
+
+  web:
+    build: ./web
+    image: pradyunuydarp/lastmile-web:latest
+    environment:
+      GATEWAY_UPSTREAM: gateway:8082
+    ports:
+      - "8080:80"
+    depends_on: [gateway]
+
+  # Opt-in: `docker compose --profile load up loadgen`
+  loadgen:
+    <<: *go-service
+    build: {context: ., args: {SERVICE: loadgen}}
+    image: pradyunuydarp/lastmile-loadgen:latest
+    profiles: [load]
+    environment:
+      MATCHING_ADDR: dns:///matching:50053
+      CONCURRENCY: "8"

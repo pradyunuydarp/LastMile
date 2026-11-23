@@ -1,8 +1,13 @@
+# Load generator for the autoscaling demo.
+#   kubectl apply -f k8s/loadgen.yaml
+#   kubectl -n lastmile logs -f deploy/loadgen     # watch served_by spread across pods
+#   kubectl delete -f k8s/loadgen.yaml             # stop the load
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: loadgen
   namespace: lastmile
+  labels: {app: loadgen, part-of: lastmile}
 spec:
   replicas: 1
   selector:
@@ -10,22 +15,20 @@ spec:
       app: loadgen
   template:
     metadata:
-      labels:
-        app: loadgen
+      labels: {app: loadgen, part-of: lastmile}
     spec:
       containers:
         - name: loadgen
           image: pradyunuydarp/lastmile-loadgen:latest
           imagePullPolicy: IfNotPresent
           env:
+            # dns:/// + the headless Service = one backend per Matching pod.
             - name: MATCHING_ADDR
-              value: "matching.lastmile.svc.cluster.local:50053"
+              value: "dns:///matching.lastmile.svc.cluster.local:50053"
             - name: CONCURRENCY
-              value: "50"
+              value: "16"
+            - name: DRIVERS_PER_REQUEST
+              value: "200"
           resources:
-            requests:
-              cpu: 100m
-              memory: 64Mi
-            limits:
-              cpu: 500m
-              memory: 256Mi
+            requests: {cpu: 200m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}

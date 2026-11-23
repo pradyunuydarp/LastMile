@@ -1,3 +1,6 @@
+# Rendered at container start by the nginx image's envsubst step:
+# ${GATEWAY_UPSTREAM} is the gateway's host:port (Kubernetes Service by
+# default, "gateway:8082" under docker compose).
 server {
     listen 80;
     
@@ -8,7 +11,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://gateway.lastmile.svc.cluster.local:80/;
+        proxy_pass http://${GATEWAY_UPSTREAM}/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -18,7 +21,7 @@ server {
 
     # Proxy specific Gateway endpoints that are called without /api/ prefix
     location ~ ^/(auth|aggregates|metro|drivers|rides|location|notifications|matching|user)/ {
-        proxy_pass http://gateway.lastmile.svc.cluster.local:80;
+        proxy_pass http://${GATEWAY_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -30,7 +33,7 @@ server {
     }
 
     location /socket.io/ {
-        proxy_pass http://gateway.lastmile.svc.cluster.local:80;
+        proxy_pass http://${GATEWAY_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

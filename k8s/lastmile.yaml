@@ -1,116 +1,25 @@
+# LastMile on Kubernetes: every microservice + the gateway.
+#
+#   kubectl apply -f k8s/lastmile.yaml     # services + gateway
+#   kubectl apply -f k8s/web.yaml          # React web app
+#   kubectl apply -f k8s/loadgen.yaml      # load for the autoscaling demo
+#
+# Optional: use Supabase instead of the in-memory demo accounts
+#   kubectl -n lastmile create secret generic lastmile-supabase \
+#     --from-literal=SUPABASE_URL=https://<project>.supabase.co \
+#     --from-literal=SUPABASE_KEY=<anon-key>
 apiVersion: v1
 kind: Namespace
 metadata:
   name: lastmile
 ---
-# Driver Service
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: driver
-  namespace: lastmile
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: driver
-  template:
-    metadata:
-      labels:
-        app: driver
-    spec:
-      containers:
-        - name: driver
-          image: pradyunuydarp/lastmile-driver:latest # replace with your registry image
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: DRIVER_GRPC_ADDR
-              value: ":50051"
-          ports:
-            - containerPort: 50051
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 256Mi
-          livenessProbe:
-            tcpSocket:
-              port: 50051
-            initialDelaySeconds: 10
-            periodSeconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: driver
-  namespace: lastmile
-spec:
-  selector:
-    app: driver
-  ports:
-    - name: grpc
-      port: 50051
-      targetPort: 50051
----
-# Rider Service
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: rider
-  namespace: lastmile
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: rider
-  template:
-    metadata:
-      labels:
-        app: rider
-    spec:
-      containers:
-        - name: rider
-          image: pradyunuydarp/lastmile-rider:latest
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: RIDER_GRPC_ADDR
-              value: ":50055"
-          ports:
-            - containerPort: 50055
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 256Mi
-          livenessProbe:
-            tcpSocket:
-              port: 50055
-            initialDelaySeconds: 10
-            periodSeconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: rider
-  namespace: lastmile
-spec:
-  selector:
-    app: rider
-  ports:
-    - name: grpc
-      port: 50055
-      targetPort: 50055
----
-# Station Service
+# Station service: Station metadata (seeded with Bengaluru stations).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: station
   namespace: lastmile
+  labels: {app: station, part-of: lastmile}
 spec:
   replicas: 1
   selector:
@@ -118,9 +27,9 @@ spec:
       app: station
   template:
     metadata:
-      labels:
-        app: station
+      labels: {app: station, part-of: lastmile}
     spec:
+      terminationGracePeriodSeconds: 20
       containers:
         - name: station
           image: pradyunuydarp/lastmile-station:latest
@@ -128,19 +37,25 @@ spec:
           env:
             - name: STATION_GRPC_ADDR
               value: ":50056"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
-            - containerPort: 50056
+            - name: grpc
+              containerPort: 50056
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 256Mi
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          # Native gRPC probes call grpc.health.v1.Health/Check, which the
+          # chassis implements. NOT_SERVING during shutdown = no new traffic.
+          readinessProbe:
+            grpc: {port: 50056}
+            periodSeconds: 2
+            failureThreshold: 1
           livenessProbe:
-            tcpSocket:
-              port: 50056
-            initialDelaySeconds: 10
+            grpc: {port: 50056}
+            initialDelaySeconds: 5
             periodSeconds: 10
 ---
 apiVersion: v1
@@ -148,6 +63,7 @@ kind: Service
 metadata:
   name: station
   namespace: lastmile
+  labels: {app: station, part-of: lastmile}
 spec:
   selector:
     app: station
@@ -156,12 +72,131 @@ spec:
       port: 50056
       targetPort: 50056
 ---
-# Trip Service
+# Driver service: Driver profiles and routes (in-memory).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driver
+  namespace: lastmile
+  labels: {app: driver, part-of: lastmile}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: driver
+  template:
+    metadata:
+      labels: {app: driver, part-of: lastmile}
+    spec:
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: driver
+          image: pradyunuydarp/lastmile-driver:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DRIVER_GRPC_ADDR
+              value: ":50051"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: grpc
+              containerPort: 50051
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          # Native gRPC probes call grpc.health.v1.Health/Check, which the
+          # chassis implements. NOT_SERVING during shutdown = no new traffic.
+          readinessProbe:
+            grpc: {port: 50051}
+            periodSeconds: 2
+            failureThreshold: 1
+          livenessProbe:
+            grpc: {port: 50051}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: driver
+  namespace: lastmile
+  labels: {app: driver, part-of: lastmile}
+spec:
+  selector:
+    app: driver
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+---
+# Rider service: Rider registrations (in-memory).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rider
+  namespace: lastmile
+  labels: {app: rider, part-of: lastmile}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rider
+  template:
+    metadata:
+      labels: {app: rider, part-of: lastmile}
+    spec:
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: rider
+          image: pradyunuydarp/lastmile-rider:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RIDER_GRPC_ADDR
+              value: ":50055"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: grpc
+              containerPort: 50055
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          # Native gRPC probes call grpc.health.v1.Health/Check, which the
+          # chassis implements. NOT_SERVING during shutdown = no new traffic.
+          readinessProbe:
+            grpc: {port: 50055}
+            periodSeconds: 2
+            failureThreshold: 1
+          livenessProbe:
+            grpc: {port: 50055}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rider
+  namespace: lastmile
+  labels: {app: rider, part-of: lastmile}
+spec:
+  selector:
+    app: rider
+  ports:
+    - name: grpc
+      port: 50055
+      targetPort: 50055
+---
+# Trip service: Trip lifecycle API.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: trip
   namespace: lastmile
+  labels: {app: trip, part-of: lastmile}
 spec:
   replicas: 1
   selector:
@@ -169,9 +204,9 @@ spec:
       app: trip
   template:
     metadata:
-      labels:
-        app: trip
+      labels: {app: trip, part-of: lastmile}
     spec:
+      terminationGracePeriodSeconds: 20
       containers:
         - name: trip
           image: pradyunuydarp/lastmile-trip:latest
@@ -179,19 +214,25 @@ spec:
           env:
             - name: TRIP_GRPC_ADDR
               value: ":50057"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
-            - containerPort: 50057
+            - name: grpc
+              containerPort: 50057
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 256Mi
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          # Native gRPC probes call grpc.health.v1.Health/Check, which the
+          # chassis implements. NOT_SERVING during shutdown = no new traffic.
+          readinessProbe:
+            grpc: {port: 50057}
+            periodSeconds: 2
+            failureThreshold: 1
           livenessProbe:
-            tcpSocket:
-              port: 50057
-            initialDelaySeconds: 10
+            grpc: {port: 50057}
+            initialDelaySeconds: 5
             periodSeconds: 10
 ---
 apiVersion: v1
@@ -199,6 +240,7 @@ kind: Service
 metadata:
   name: trip
   namespace: lastmile
+  labels: {app: trip, part-of: lastmile}
 spec:
   selector:
     app: trip
@@ -207,12 +249,13 @@ spec:
       port: 50057
       targetPort: 50057
 ---
-# Notification Service
+# Notification service: Notification API.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: notification
   namespace: lastmile
+  labels: {app: notification, part-of: lastmile}
 spec:
   replicas: 1
   selector:
@@ -220,9 +263,9 @@ spec:
       app: notification
   template:
     metadata:
-      labels:
-        app: notification
+      labels: {app: notification, part-of: lastmile}
     spec:
+      terminationGracePeriodSeconds: 20
       containers:
         - name: notification
           image: pradyunuydarp/lastmile-notification:latest
@@ -230,19 +273,25 @@ spec:
           env:
             - name: NOTIFICATION_GRPC_ADDR
               value: ":50058"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
-            - containerPort: 50058
+            - name: grpc
+              containerPort: 50058
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 256Mi
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          # Native gRPC probes call grpc.health.v1.Health/Check, which the
+          # chassis implements. NOT_SERVING during shutdown = no new traffic.
+          readinessProbe:
+            grpc: {port: 50058}
+            periodSeconds: 2
+            failureThreshold: 1
           livenessProbe:
-            tcpSocket:
-              port: 50058
-            initialDelaySeconds: 10
+            grpc: {port: 50058}
+            initialDelaySeconds: 5
             periodSeconds: 10
 ---
 apiVersion: v1
@@ -250,6 +299,7 @@ kind: Service
 metadata:
   name: notification
   namespace: lastmile
+  labels: {app: notification, part-of: lastmile}
 spec:
   selector:
     app: notification
@@ -258,12 +308,13 @@ spec:
       port: 50058
       targetPort: 50058
 ---
-# Location Service (with matching proximity trigger)
+# Location service: Driver GPS ingest + approach-zone detection.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: location
   namespace: lastmile
+  labels: {app: location, part-of: lastmile}
 spec:
   replicas: 1
   selector:
@@ -271,9 +322,9 @@ spec:
       app: location
   template:
     metadata:
-      labels:
-        app: location
+      labels: {app: location, part-of: lastmile}
     spec:
+      terminationGracePeriodSeconds: 20
       containers:
         - name: location
           image: pradyunuydarp/lastmile-location:latest
@@ -281,21 +332,27 @@ spec:
           env:
             - name: LOCATION_GRPC_ADDR
               value: ":50054"
-            - name: MATCHING_ADDR
-              value: "matching.lastmile.svc.cluster.local:50053"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: STATION_ADDR
+              value: "station.lastmile.svc.cluster.local:50056"
           ports:
-            - containerPort: 50054
+            - name: grpc
+              containerPort: 50054
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 256Mi
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          # Native gRPC probes call grpc.health.v1.Health/Check, which the
+          # chassis implements. NOT_SERVING during shutdown = no new traffic.
+          readinessProbe:
+            grpc: {port: 50054}
+            periodSeconds: 2
+            failureThreshold: 1
           livenessProbe:
-            tcpSocket:
-              port: 50054
-            initialDelaySeconds: 10
+            grpc: {port: 50054}
+            initialDelaySeconds: 5
             periodSeconds: 10
 ---
 apiVersion: v1
@@ -303,6 +360,7 @@ kind: Service
 metadata:
   name: location
   namespace: lastmile
+  labels: {app: location, part-of: lastmile}
 spec:
   selector:
     app: location
@@ -311,87 +369,13 @@ spec:
       port: 50054
       targetPort: 50054
 ---
-# Matching Service (scale 1→5 via HPA)
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: matching
-  namespace: lastmile
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: matching
-  template:
-    metadata:
-      labels:
-        app: matching
-    spec:
-      containers:
-        - name: matching
-          image: pradyunuydarp/lastmile-matching:latest
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: MATCHING_GRPC_ADDR
-              value: ":50053"
-          ports:
-            - containerPort: 50053
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
-          livenessProbe:
-            tcpSocket:
-              port: 50053
-            initialDelaySeconds: 10
-            periodSeconds: 10
----
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: matching
-  namespace: lastmile
-spec:
-  clusterIP: None
-  selector:
-    app: matching
-  ports:
-    - name: grpc
-      port: 50053
-      targetPort: 50053
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: matching
-  namespace: lastmile
-spec:
-  minReplicas: 1
-  maxReplicas: 8
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: matching
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 60
-
----
-# User Service
+# User service: Profiles + auth. Uses Supabase if the lastmile-supabase Secret exists, otherwise in-memory demo accounts.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: user
   namespace: lastmile
+  labels: {app: user, part-of: lastmile}
 spec:
   replicas: 1
   selector:
@@ -399,9 +383,9 @@ spec:
       app: user
   template:
     metadata:
-      labels:
-        app: user
+      labels: {app: user, part-of: lastmile}
     spec:
+      terminationGracePeriodSeconds: 20
       containers:
         - name: user
           image: pradyunuydarp/lastmile-user:latest
@@ -409,24 +393,29 @@ spec:
           env:
             - name: USER_GRPC_ADDR
               value: ":50052"
-            - name: SUPABASE_URL
-              value: "https://iztrmelyewgjkfcyzwdf.supabase.co"
-            - name: SUPABASE_KEY
-              value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml6dHJtZWx5ZXdnamtmY3l6d2RmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQxMTY5MzksImV4cCI6MjA3OTY5MjkzOX0.tzXUMnMI3Gq5Zx6stNip6_6riDRJNAh8Ohg_mky1qDM"
-
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - secretRef:
+                name: lastmile-supabase
+                optional: true
           ports:
-            - containerPort: 50052
+            - name: grpc
+              containerPort: 50052
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 256Mi
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          # Native gRPC probes call grpc.health.v1.Health/Check, which the
+          # chassis implements. NOT_SERVING during shutdown = no new traffic.
+          readinessProbe:
+            grpc: {port: 50052}
+            periodSeconds: 2
+            failureThreshold: 1
           livenessProbe:
-            tcpSocket:
-              port: 50052
-            initialDelaySeconds: 10
+            grpc: {port: 50052}
+            initialDelaySeconds: 5
             periodSeconds: 10
 ---
 apiVersion: v1
@@ -434,6 +423,7 @@ kind: Service
 metadata:
   name: user
   namespace: lastmile
+  labels: {app: user, part-of: lastmile}
 spec:
   selector:
     app: user
@@ -442,12 +432,112 @@ spec:
       port: 50052
       targetPort: 50052
 ---
-# Gateway (gRPC + HTTP for mobile)
+# Matching service: STATELESS matching rules. This is the one we scale 1 -> 5.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matching
+  namespace: lastmile
+  labels: {app: matching, part-of: lastmile}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: matching
+  template:
+    metadata:
+      labels: {app: matching, part-of: lastmile}
+    spec:
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: matching
+          image: pradyunuydarp/lastmile-matching:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MATCHING_GRPC_ADDR
+              value: ":50053"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: grpc
+              containerPort: 50053
+          resources:
+            requests: {cpu: 100m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          # Native gRPC probes call grpc.health.v1.Health/Check, which the
+          # chassis implements. NOT_SERVING during shutdown = no new traffic.
+          readinessProbe:
+            grpc: {port: 50053}
+            periodSeconds: 2
+            failureThreshold: 1
+          livenessProbe:
+            grpc: {port: 50053}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: matching
+  namespace: lastmile
+  labels: {app: matching, part-of: lastmile}
+spec:
+  # Headless: DNS returns one A record PER POD, so gRPC's round_robin
+  # balancer can spread calls across every replica. With a normal ClusterIP
+  # all calls ride one HTTP/2 connection to one pod.
+  clusterIP: None
+  selector:
+    app: matching
+  ports:
+    - name: grpc
+      port: 50053
+      targetPort: 50053
+---
+# Autoscale Matching between 1 and 5 replicas on CPU. The behavior block makes
+# it react within seconds (scale up) and a minute (scale down) so the demo
+# fits in a lecture; production would use slower, steadier settings.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: matching
+  namespace: lastmile
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: matching
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 20
+---
+# Gateway: HTTP + socket.io for browsers/phones, gRPC to everything else.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gateway
   namespace: lastmile
+  labels: {app: gateway, part-of: lastmile}
 spec:
   replicas: 1
   selector:
@@ -455,39 +545,54 @@ spec:
       app: gateway
   template:
     metadata:
-      labels:
-        app: gateway
+      labels: {app: gateway, part-of: lastmile}
     spec:
+      terminationGracePeriodSeconds: 20
       containers:
         - name: gateway
           image: pradyunuydarp/lastmile-gateway:latest
-          imagePullPolicy: Never
+          imagePullPolicy: IfNotPresent
           env:
             - name: GATEWAY_GRPC_ADDR
               value: ":50060"
             - name: GATEWAY_HTTP_ADDR
               value: ":8082"
-            - name: USER_ADDR
-              value: "user.lastmile.svc.cluster.local:50052"
             - name: DRIVER_ADDR
               value: "driver.lastmile.svc.cluster.local:50051"
+            - name: USER_ADDR
+              value: "user.lastmile.svc.cluster.local:50052"
+            - name: MATCHING_ADDR
+              value: "dns:///matching.lastmile.svc.cluster.local:50053"
             - name: LOCATION_ADDR
               value: "location.lastmile.svc.cluster.local:50054"
-
+            - name: RIDER_ADDR
+              value: "rider.lastmile.svc.cluster.local:50055"
+            - name: STATION_ADDR
+              value: "station.lastmile.svc.cluster.local:50056"
+            - name: TRIP_ADDR
+              value: "trip.lastmile.svc.cluster.local:50057"
+            - name: NOTIFICATION_ADDR
+              value: "notification.lastmile.svc.cluster.local:50058"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
-            - containerPort: 50060
-            - containerPort: 8082
+            - name: http
+              containerPort: 8082
+            - name: grpc
+              containerPort: 50060
           resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          # /healthz checks only the gateway process itself. If it checked
+          # downstream services, one dead service would get the gateway killed too.
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8082}
+            periodSeconds: 3
           livenessProbe:
-            tcpSocket:
-              port: 8082
-            initialDelaySeconds: 10
+            httpGet: {path: /healthz, port: 8082}
+            initialDelaySeconds: 5
             periodSeconds: 10
 ---
 apiVersion: v1
@@ -495,6 +600,7 @@ kind: Service
 metadata:
   name: gateway
   namespace: lastmile
+  labels: {app: gateway, part-of: lastmile}
 spec:
   selector:
     app: gateway
@@ -505,4 +611,3 @@ spec:
     - name: grpc
       port: 50060
       targetPort: 50060
-  type: ClusterIP

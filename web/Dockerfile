@@ -1,29 +1,16 @@
-# Stage 1: Build the React application
-FROM node:18-alpine as builder
-
+# ---- build ----------------------------------------------------------------
+# Vite 7 needs Node >= 20.19 (the old node:18 base could not build this app).
+FROM node:22-alpine AS builder
 WORKDIR /app
-
-# Copy package files
-COPY package.json pnpm-lock.yaml* ./
-
-# Install dependencies
-RUN npm install
-
-# Copy source code
+COPY package.json ./
+RUN npm install --no-audit --no-fund
 COPY . .
-
-# Build
 RUN npm run build
 
-# Stage 2: Serve with Nginx
-FROM nginx:alpine
-
-# Copy built assets from builder
+# ---- serve ----------------------------------------------------------------
+FROM nginx:1.27-alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Copy custom nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
+# The nginx image renders /etc/nginx/templates/*.template with envsubst.
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+ENV GATEWAY_UPSTREAM=gateway.lastmile.svc.cluster.local:80
 EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
