@@ -43,6 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (typeof window === 'undefined') {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time hydration of the stored session from localStorage after mount
             setLoading(false);
             return;
         }
@@ -72,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         const fallback = typeof window !== 'undefined' ? window.localStorage.getItem(INTENT_ROLE_KEY) : null;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- re-reads the localStorage intent on session change; deriving in render would change Realtime reconnect timing
         setRole(deriveRole(session?.user ?? null, fallback));
     }, [session]);
 
@@ -99,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook is co-located with its provider; only affects dev HMR
 export function useAuth() {
     const context = useContext(AuthContext);
     if (context === undefined) {

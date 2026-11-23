@@ -1,5 +1,7 @@
-import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
+import { MapContainer, Marker, Popup } from 'react-leaflet';
 import type { Driver } from '../lib/types';
+import { BaseTiles } from './MapTiles';
+import { mapIcons } from './mapIcons';
 
 interface DriversMapProps {
   drivers: Driver[];
@@ -17,31 +19,29 @@ export function DriversMap({ drivers, userLocation }: DriversMapProps) {
     : DEFAULT_CENTER;
 
   return (
-    <MapContainer center={center} zoom={13} className="h-[340px] w-full rounded-2xl overflow-hidden">
-      <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      />
-      {drivers.map((driver) => {
-        const latitude = driver.latitude ?? firstWithCoords?.latitude ?? DEFAULT_CENTER[0];
-        const longitude = driver.longitude ?? firstWithCoords?.longitude ?? DEFAULT_CENTER[1];
-        return (
-          <Marker key={driver.id} position={[latitude, longitude]}>
-            <Popup>
-              <div className="text-sm text-slate-800">
-                <p className="font-semibold">{driver.name}</p>
-                <p>ETA: {driver.etaMinutes} min</p>
-                <p>Seats: {driver.seatsAvailable}</p>
-              </div>
-            </Popup>
+    <div className="map-frame h-[300px] w-full lg:h-full lg:min-h-[340px]">
+      <MapContainer center={center} zoom={13} className="h-full w-full">
+        <BaseTiles />
+        {drivers.map((driver) => {
+          const latitude = driver.latitude ?? firstWithCoords?.latitude ?? DEFAULT_CENTER[0];
+          const longitude = driver.longitude ?? firstWithCoords?.longitude ?? DEFAULT_CENTER[1];
+          return (
+            <Marker key={driver.id} position={[latitude, longitude]} icon={mapIcons.driver}>
+              <Popup>
+                <div>
+                  <p className="font-semibold">{driver.name}</p>
+                  <p className="text-label-2">ETA {driver.etaMinutes} min · {driver.seatsAvailable} seats</p>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+        {userLocation ? (
+          <Marker position={[userLocation.lat, userLocation.lng]} icon={mapIcons.user}>
+            <Popup>You are here</Popup>
           </Marker>
-        );
-      })}
-      {userLocation ? (
-        <Marker position={[userLocation.lat, userLocation.lng]}>
-          <Popup>You are here</Popup>
-        </Marker>
-      ) : null}
-    </MapContainer>
+        ) : null}
+      </MapContainer>
+    </div>
   );
 }

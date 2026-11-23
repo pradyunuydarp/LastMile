@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { MapPin, Navigation, Users, LogOut, Power, Search, PlayCircle } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
+import { MapPin, Navigation, Users, LogOut, Power, Search, CirclePlay, CircleAlert, CircleCheck, Check, Radio, LocateFixed, CarFront, Inbox, Route, Clock } from 'lucide-react';
+import { MapContainer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { acceptDriverRequest, bookRide, fetchDriverRequests, fetchPickupPoints, fetchSnapshot, saveDriverRoute, startDriverTrip } from '../lib/backend';
 import type { BookRideResponse, Driver, DriverRequestsResponse, PickupPoint, TripStatusPayload } from '../lib/types';
@@ -12,27 +11,91 @@ import { DriversMap } from './DriversMap';
 import { DriverCard } from './DriverCard';
 import { Room } from './Room';
 import { useRealtime } from '../contexts/RealtimeContext';
+import { BaseTiles, MapUpdater, RouteLine } from './MapTiles';
+import { dotIcon, mapIcons, stopIcon } from './mapIcons';
+import { SegmentedControl } from './SegmentedControl';
 
-// Fix Leaflet default icon issue
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+// Tidy circular marker instead of Leaflet's default blue pin.
+L.Marker.prototype.options.icon = mapIcons.dot;
 
-let DefaultIcon = L.icon({
-    iconUrl: icon,
-    shadowUrl: iconShadow,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-});
+const stationDotIcon = dotIcon('sys-indigo', 16);
 
-L.Marker.prototype.options.icon = DefaultIcon;
+/* ---------------------------------------------------------------------------
+   Small presentational building blocks (Apple-style inset grouped UI).
+   --------------------------------------------------------------------------- */
 
-// Component to center map on location update
-function MapUpdater({ center }: { center: [number, number] }) {
-    const map = useMap();
-    useEffect(() => {
-        map.setView(center, map.getZoom());
-    }, [center, map]);
-    return null;
+function CardHeader({ title, subtitle, accessory }: { title: string; subtitle?: string; accessory?: ReactNode }) {
+    return (
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div className="min-w-0">
+                <h2 className="card-title">{title}</h2>
+                {subtitle ? <p className="card-subtitle">{subtitle}</p> : null}
+            </div>
+            {accessory}
+        </div>
+    );
+}
+
+function EmptyState({ icon, title, children }: { icon: ReactNode; title: string; children?: ReactNode }) {
+    return (
+        <div className="flex flex-col items-center justify-center rounded-[14px] bg-grouped-3 px-6 py-10 text-center">
+            <span className="mb-3 text-label-3 [&>svg]:h-8 [&>svg]:w-8" aria-hidden="true">{icon}</span>
+            <p className="text-headline text-label">{title}</p>
+            {children ? <p className="mt-1 max-w-sm text-subhead text-label-2">{children}</p> : null}
+        </div>
+    );
+}
+
+function Stat({ icon, tint, label, children }: { icon: ReactNode; tint: string; label: string; children: ReactNode }) {
+    return (
+        <div className="stat min-w-0">
+            <div className="flex items-center gap-2.5">
+                <span className={`icon-tile ${tint} [&>svg]:h-4 [&>svg]:w-4`} aria-hidden="true">{icon}</span>
+                <span className="text-footnote font-medium text-label-2">{label}</span>
+            </div>
+            <div className="mt-3 truncate text-title-3 text-label">{children}</div>
+        </div>
+    );
+}
+
+function Avatar({ name, tint = 'bg-sys-blue', size = 'h-10 w-10' }: { name?: string; tint?: string; size?: string }) {
+    const letters = (name ?? '?')
+        .replace(/\(.*?\)/g, '')
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join('') || '?';
+    return (
+        <span aria-hidden="true" className={`flex shrink-0 items-center justify-center rounded-full text-footnote font-semibold text-white ${tint} ${size}`}>
+            {letters}
+        </span>
+    );
+}
+
+/** Maps a backend status string to a pill colour. */
+const statusTone = (status?: string) => {
+    const value = (status ?? '').toLowerCase();
+    if (/(complete|matched|accepted|approved)/.test(value)) return 'pill-green';
+    if (/(cancel|declin|reject|fail|expired)/.test(value)) return 'pill-red';
+    if (/(progress|active|riding|en_route)/.test(value)) return 'pill-blue';
+    if (value) return 'pill-orange';
+    return 'pill-gray';
+};
+
+const humanize = (value?: string) => (value ?? '').replace(/_/g, ' ');
+
+/** Success copy gets a green notice; everything else stays neutral. */
+const noticeTone = (message: string) =>
+    /^(route saved|trip started|simulated trip started|trip confirmed)/i.test(message) ? 'notice-green' : 'notice-gray';
+
+function KeyValue({ label, children }: { label: string; children: ReactNode }) {
+    return (
+        <div className="list-row min-h-[44px] justify-between py-2.5">
+            <span className="shrink-0 text-subhead text-label-2">{label}</span>
+            <span className="min-w-0 truncate text-right text-subhead font-medium text-label">{children}</span>
+        </div>
+    );
 }
 
 const formatDistance = (meters?: number) => {
@@ -63,13 +126,15 @@ export function Dashboard() {
                 // Cast or ensure compatibility. Assuming RiderStatus is compatible enough or we need to map it.
                 // Ideally we should use a proper converter, but for now we trust the shape overlap for key fields.
                 // We need to ensure 'status' field matches TripStatusPayload type if strict.
-                setActiveRoom({ id: riderStatus.tripId, status: riderStatus as any });
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- reopens the room implied by rider:status; compares against this render's activeRoom on purpose
+                setActiveRoom({ id: riderStatus.tripId, status: riderStatus as TripStatusPayload });
             }
         }
 
         return () => {
             socket.off('trip:room-created', onRoomCreated);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- adding activeRoom would reopen the room right after the user minimises it
     }, [socket, riderStatus]);
 
     const role = user?.user_metadata?.role || authRole || 'rider';
@@ -88,9 +153,13 @@ export function Dashboard() {
     ] as const;
     const [activeTab, setActiveTab] = useState<string>('dashboard');
 
-    useEffect(() => {
+    // Driver and rider have different tab sets, so go back to the dashboard
+    // tab when the role flips (adjusting state during render, not in an effect).
+    const [tabsForDriver, setTabsForDriver] = useState(isDriver);
+    if (tabsForDriver !== isDriver) {
+        setTabsForDriver(isDriver);
         setActiveTab('dashboard');
-    }, [isDriver]);
+    }
 
     const tabs = isDriver ? driverTabs : riderTabs;
 
@@ -226,6 +295,7 @@ export function Dashboard() {
                 navigator.geolocation.clearWatch(watchIdRef.current);
             }
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- startLocationTracking is recreated every render; adding it would restart the GPS watch on each render
     }, [isDriver, isOnline, simulating]);
 
     // Simulation Loop
@@ -314,6 +384,7 @@ export function Dashboard() {
 
     useEffect(() => {
         if (!isDriver || !user?.id) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clears polled requests when the viewer stops being a driver, in step with the polling below
             setDriverRequests(null);
             return;
         }
@@ -344,6 +415,7 @@ export function Dashboard() {
 
     useEffect(() => {
         if (isDriver && queueSummary) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors socket queue pushes into the same state the REST poll above writes
             setDriverRequests(queueSummary);
             setDriverRequestError(null);
         }
@@ -479,374 +551,441 @@ export function Dashboard() {
         return [12.8456, 77.66];
     })();
 
+    const displayName =
+        (user?.user_metadata?.full_name as string | undefined) ?? user?.name ?? user?.email ?? (isDriver ? 'Driver' : 'Rider');
+
     const driverNetworkCard = (
-        <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div>
-                    <h2 className="text-xl font-bold">Driver network</h2>
-                    <p className="text-slate-400 text-sm">Live view of drivers reported by the gateway.</p>
-                </div>
-                <div className="text-xs uppercase tracking-wide text-slate-500">
-                    {snapshotLoading ? 'Refreshing…' : 'Auto-refreshing every 15s'}
-                </div>
-            </div>
+        <section className="card">
+            <CardHeader
+                title="Driver network"
+                subtitle="Live view of drivers reported by the gateway."
+                accessory={
+                    <span className="pill pill-gray">
+                        {snapshotLoading ? 'Refreshing…' : 'Auto-refreshing every 15s'}
+                    </span>
+                }
+            />
             {snapshotError ? (
-                <div className="bg-red-500/10 border border-red-500/30 text-sm text-red-200 rounded-lg p-3">
-                    {snapshotError}
+                <div className="notice notice-red mb-4" role="alert">
+                    <CircleAlert className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                    <span>{snapshotError}</span>
                 </div>
             ) : null}
             {drivers.length ? (
-                <div className="grid lg:grid-cols-2 gap-6">
+                <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
                     <DriversMap drivers={drivers} userLocation={location} />
-                    <div className="space-y-4 max-h-[360px] overflow-y-auto pr-2">
+                    <div className="list max-h-[380px] self-start overflow-y-auto overscroll-contain" style={{ ['--row-inset' as string]: '68px' }}>
                         {drivers.map((driver) => (
                             <DriverCard key={driver.id} driver={driver} />
                         ))}
                     </div>
                 </div>
             ) : (
-                <p className="text-slate-400 text-sm">No active drivers yet. Once the gateway reports drivers they’ll appear here.</p>
+                <EmptyState icon={<CarFront />} title="No active drivers yet">
+                    Once the gateway reports drivers they’ll appear here.
+                </EmptyState>
             )}
-        </div>
+        </section>
     );
 
     const riderNetworkCard = (
-        <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div>
-                    <h2 className="text-xl font-bold">Rider network</h2>
-                    <p className="text-slate-400 text-sm">View and accept riders queued along your metro drops.</p>
-                </div>
-                <div className="text-xs text-slate-500">
-                    {driverRequests?.generatedAt
-                        ? `Updated ${new Date(driverRequests.generatedAt).toLocaleTimeString()}`
-                        : 'Polling every 15s'}
-                </div>
-            </div>
-            {driverRequestError ? (
-                <div className="bg-red-500/10 border border-red-500/30 text-sm text-red-200 rounded-lg p-3">
-                    {driverRequestError}
-                </div>
-            ) : null}
-            {acceptFeedback ? (
-                <div className="bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-200 rounded-lg p-3">
-                    {acceptFeedback}
-                </div>
-            ) : null}
-            {driverRequests && driverRequests.requests.length ? (
-                <div className="grid lg:grid-cols-2 gap-6">
-                    <div className="h-64 rounded-lg overflow-hidden border border-slate-700">
-                        <MapContainer center={driverRequestCenter} zoom={14} style={{ height: '100%', width: '100%' }}>
-                            <TileLayer
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                            />
-                            {selfDriver?.latitude && selfDriver.longitude ? (
-                                <Marker position={[selfDriver.latitude, selfDriver.longitude]}>
-                                    <Popup>You</Popup>
-                                </Marker>
-                            ) : null}
-                            {driverRequests.requests.map((req) => {
-                                const pickup = req.pickup;
-                                if (pickup?.latitude && pickup.longitude) {
-                                    return (
-                                        <Marker key={req.id} position={[pickup.latitude, pickup.longitude]}>
-                                            <Popup>
-                                                <div>
-                                                    <p className="font-semibold">{req.name}</p>
-                                                    <p className="text-xs text-slate-500">{pickup.name}</p>
-                                                </div>
-                                            </Popup>
-                                        </Marker>
-                                    );
-                                }
-                                if (req.station.latitude && req.station.longitude) {
-                                    return (
-                                        <Marker key={req.id} position={[req.station.latitude, req.station.longitude]}>
-                                            <Popup>
-                                                <div>
-                                                    <p className="font-semibold">{req.name}</p>
-                                                    <p className="text-xs text-slate-500">{req.station.name}</p>
-                                                </div>
-                                            </Popup>
-                                        </Marker>
-                                    );
-                                }
-                                return null;
-                            })}
-                            <MapUpdater center={driverRequestCenter} />
-                        </MapContainer>
-                    </div>
-                    <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
-                        {driverRequests.requests.map((req) => (
-                            <div key={req.id} className="bg-slate-900/40 border border-slate-700 rounded-lg p-4">
-                                <div className="flex justify-between items-center mb-1">
-                                    <div>
-                                        <p className="font-semibold">{req.name}</p>
-                                        <p className="text-slate-400 text-sm">Pickup · {req.pickup?.name ?? req.station.name}</p>
-                                    </div>
-                                    <span className={`text-xs uppercase ${req.status === 'matched' ? 'text-emerald-300' : 'text-amber-300'}`}>
-                                        {req.status}
-                                    </span>
-                                </div>
-                                <p className="text-slate-400 text-sm">Station · {req.station.name}</p>
-                                <p className="text-slate-500 text-xs">Distance · {formatDistance(req.distanceMeters)}</p>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => handleAcceptRider(req.id, false)}
-                                        disabled={acceptingRiderId === req.id}
-                                        className={`mt-3 flex-1 rounded-lg py-2 text-sm font-semibold transition ${acceptingRiderId === req.id
-                                            ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                                            : 'bg-emerald-500 text-white hover:bg-emerald-600'
-                                            }`}
-                                    >
-                                        {acceptingRiderId === req.id ? 'Confirming…' : 'Accept'}
-                                    </button>
-                                    <button
-                                        onClick={() => handleAcceptRider(req.id, true)}
-                                        disabled={acceptingRiderId === req.id}
-                                        className={`mt-3 flex-none px-4 rounded-lg py-2 text-sm font-semibold transition ${acceptingRiderId === req.id
-                                            ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                                            : 'bg-blue-600 text-white hover:bg-blue-700'
-                                            }`}
-                                        title="Simulate Trip"
-                                    >
-                                        <PlayCircle size={18} />
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            ) : (
-                <p className="text-slate-400 text-sm">Waiting for riders near your stations. Hang tight.</p>
-            )}
+        <>
             {approachAlert && (
                 <div
                     key={approachAlert.receivedAt}
-                    className="mt-4 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-100"
+                    role="status"
+                    className="card flex animate-pop items-start gap-4 !p-4 sm:!p-5"
                 >
-                    <span className="font-semibold">Approaching {approachAlert.stationName}</span>
-                    {' · '}
-                    {(approachAlert.distanceMeters / 1000).toFixed(1)} km · ~{Math.max(1, Math.round(approachAlert.etaMinutes))} min out.
-                    <span className="block text-xs text-amber-200/80">
-                        Location service detected the approach zone; Matching just refreshed your rider list.
+                    <span className="icon-tile h-10 w-10 rounded-[11px] bg-sys-orange [&>svg]:h-5 [&>svg]:w-5" aria-hidden="true">
+                        <Navigation />
                     </span>
+                    <div className="min-w-0 flex-1">
+                        <p className="text-headline text-label">Approaching {approachAlert.stationName}</p>
+                        <p className="tabular text-subhead text-label-2">
+                            {(approachAlert.distanceMeters / 1000).toFixed(1)} km · ~{Math.max(1, Math.round(approachAlert.etaMinutes))} min out
+                        </p>
+                        <p className="mt-1 text-footnote text-label-2">
+                            Location service detected the approach zone; Matching just refreshed your rider list.
+                        </p>
+                    </div>
+                    <span className="pill pill-orange hidden sm:inline-flex">Approach zone</span>
                 </div>
             )}
-            <div className="border-t border-slate-700 pt-4 mt-4">
-                <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-semibold">Live socket offers</h3>
-                    <span className={`text-xs uppercase ${realtimeReady ? 'text-emerald-300' : 'text-slate-500'}`}>
+
+            <section className="card">
+                <div className="mb-1 flex items-center justify-between gap-3">
+                    <h3 className="card-title">Live socket offers</h3>
+                    <span className={`pill ${realtimeReady ? 'pill-green' : 'pill-gray'}`}>
+                        <span className={`pill-dot ${realtimeReady ? '' : 'animate-breathe'}`} aria-hidden="true" />
                         {realtimeReady ? 'connected' : 'connecting…'}
                     </span>
                 </div>
+                <p className="card-subtitle mb-5">Matching pushes ride offers to you over the realtime socket.</p>
                 {offers.length ? (
-                    <div className="grid md:grid-cols-2 gap-3">
+                    <div className="grid gap-3 md:grid-cols-2">
                         {offers.map((offer) => (
-                            <div key={offer.riderId} className="bg-slate-900/50 border border-slate-700 rounded-lg p-4 space-y-2">
-                                <div className="flex justify-between items-center">
-                                    <div>
-                                        <p className="font-semibold">{offer.riderName}</p>
-                                        <p className="text-xs text-slate-400">
-                                            Pickup · {offer.pickupName ?? offer.station?.name ?? 'pending'}
-                                        </p>
+                            <div key={offer.riderId} className="animate-pop rounded-[14px] bg-grouped-3 p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="flex min-w-0 items-center gap-3">
+                                        <Avatar name={offer.riderName} tint="bg-sys-orange" />
+                                        <div className="min-w-0">
+                                            <p className="truncate text-callout font-semibold text-label">{offer.riderName}</p>
+                                            <p className="truncate text-footnote text-label-2">
+                                                Pickup · {offer.pickupName ?? offer.station?.name ?? 'pending'}
+                                            </p>
+                                        </div>
                                     </div>
-                                    <span className="text-xs text-slate-500">
+                                    <span className="pill pill-blue tabular" title="Offer attempt">
                                         {offer.attempt}/{offer.total}
                                     </span>
                                 </div>
-                                <p className="text-slate-400 text-sm">Destination · {offer.destination ?? '—'}</p>
-                                {offer.station?.name ? (
-                                    <p className="text-slate-500 text-xs">Station · {offer.station.name}</p>
-                                ) : null}
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => respondToOffer(offer.riderId, true)}
-                                        className="flex-1 rounded-lg bg-emerald-500/90 hover:bg-emerald-600 text-sm font-semibold py-1.5"
-                                    >
-                                        Accept
-                                    </button>
+                                <dl className="mt-3 space-y-1 text-footnote">
+                                    <div className="flex justify-between gap-3">
+                                        <dt className="text-label-2">Destination</dt>
+                                        <dd className="truncate text-right font-medium text-label">{offer.destination ?? '—'}</dd>
+                                    </div>
+                                    {offer.station?.name ? (
+                                        <div className="flex justify-between gap-3">
+                                            <dt className="text-label-2">Station</dt>
+                                            <dd className="truncate text-right font-medium text-label">{offer.station.name}</dd>
+                                        </div>
+                                    ) : null}
+                                </dl>
+                                <div className="mt-4 grid grid-cols-2 gap-2">
                                     <button
                                         onClick={() => respondToOffer(offer.riderId, false)}
-                                        className="flex-1 rounded-lg bg-slate-900 border border-slate-700 text-sm font-semibold py-1.5 hover:border-slate-500"
+                                        className="btn btn-gray btn-sm"
                                     >
                                         Pass
+                                    </button>
+                                    <button
+                                        onClick={() => respondToOffer(offer.riderId, true)}
+                                        className="btn btn-filled btn-sm"
+                                    >
+                                        Accept
                                     </button>
                                 </div>
                             </div>
                         ))}
                     </div>
                 ) : (
-                    <p className="text-slate-500 text-sm">No socket offers right now. Riders will appear here in real time.</p>
+                    <EmptyState icon={<Radio />} title="No socket offers right now">
+                        Riders will appear here in real time.
+                    </EmptyState>
                 )}
-            </div>
-        </div>
-    );
+            </section>
 
-    const riderBookingCard = (
-        <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 space-y-4">
-            <div>
-                <h2 className="text-xl font-bold">Book a ride from Metro</h2>
-                <p className="text-slate-400 text-sm">Select your Metro Station and destination.</p>
-            </div>
-            <form onSubmit={handleBookRide} className="space-y-4">
-                <input
-                    value={pickupQuery}
-                    onChange={(e) => setPickupQuery(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 px-3 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Search Metro Station"
+            <section className="card">
+                <CardHeader
+                    title="Rider network"
+                    subtitle="View and accept riders queued along your metro drops."
+                    accessory={
+                        <span className="pill pill-gray tabular">
+                            {driverRequests?.generatedAt
+                                ? `Updated ${new Date(driverRequests.generatedAt).toLocaleTimeString()}`
+                                : 'Polling every 15s'}
+                        </span>
+                    }
                 />
-                <div className="grid grid-cols-2 gap-3">
-                    {filteredPickupOptions.map((point: PickupPoint) => (
-                        <button
-                            key={point.id}
-                            type="button"
-                            onClick={() => {
-                                setSelectedPickupId(point.id);
-                                setSelectedDestination(null); // Reset destination when station changes
-                            }}
-                            className={`rounded-lg border px-3 py-2 text-left transition ${selectedPickupId === point.id
-                                ? 'border-emerald-400 bg-emerald-500/10 text-white'
-                                : 'border-slate-700 text-slate-300 hover:border-slate-500'
-                                }`}
-                        >
-                            <div className="font-semibold">{point.name}</div>
-                        </button>
-                    ))}
-                </div>
-                {selectedPickup ? (
-                    <div>
-                        <label className="text-xs text-slate-400 uppercase font-semibold mb-2 block">Select Destination</label>
-                        {/* Find the Station object matching selectedPickup.stationId to get nearbyAreas */}
-                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                            {DESTINATIONS.filter(d => d.stationId === selectedPickup.stationId).map((dest) => (
-                                <button
-                                    key={dest.id}
-                                    type="button"
-                                    onClick={() => setSelectedDestination(dest.name)}
-                                    className={`text-xs px-2 py-1.5 rounded border transition ${selectedDestination === dest.name
-                                        ? 'bg-blue-500/20 border-blue-500 text-white'
-                                        : 'border-slate-700 text-slate-400 hover:border-slate-500'}`}
-                                >
-                                    {dest.name}
-                                </button>
+                {driverRequestError ? (
+                    <div className="notice notice-red mb-4" role="alert">
+                        <CircleAlert className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                        <span>{driverRequestError}</span>
+                    </div>
+                ) : null}
+                {acceptFeedback ? (
+                    <div className={`notice mb-4 animate-pop ${noticeTone(acceptFeedback)}`} role="status">
+                        <CircleCheck className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                        <span>{acceptFeedback}</span>
+                    </div>
+                ) : null}
+                {driverRequests && driverRequests.requests.length ? (
+                    <div className="grid gap-5 lg:grid-cols-2">
+                        <div className="map-frame h-72 lg:h-auto lg:min-h-[320px]">
+                            <MapContainer center={driverRequestCenter} zoom={14} className="absolute inset-0">
+                                <BaseTiles />
+                                {selfDriver?.latitude && selfDriver.longitude ? (
+                                    <Marker position={[selfDriver.latitude, selfDriver.longitude]} icon={mapIcons.driver}>
+                                        <Popup>You</Popup>
+                                    </Marker>
+                                ) : null}
+                                {driverRequests.requests.map((req) => {
+                                    const pickup = req.pickup;
+                                    if (pickup?.latitude && pickup.longitude) {
+                                        return (
+                                            <Marker key={req.id} position={[pickup.latitude, pickup.longitude]} icon={mapIcons.rider}>
+                                                <Popup>
+                                                    <div>
+                                                        <p className="font-semibold">{req.name}</p>
+                                                        <p className="text-label-2">{pickup.name}</p>
+                                                    </div>
+                                                </Popup>
+                                            </Marker>
+                                        );
+                                    }
+                                    if (req.station.latitude && req.station.longitude) {
+                                        return (
+                                            <Marker key={req.id} position={[req.station.latitude, req.station.longitude]} icon={mapIcons.rider}>
+                                                <Popup>
+                                                    <div>
+                                                        <p className="font-semibold">{req.name}</p>
+                                                        <p className="text-label-2">{req.station.name}</p>
+                                                    </div>
+                                                </Popup>
+                                            </Marker>
+                                        );
+                                    }
+                                    return null;
+                                })}
+                                <MapUpdater center={driverRequestCenter} />
+                            </MapContainer>
+                        </div>
+                        <div className="list max-h-[360px] self-start overflow-y-auto overscroll-contain" style={{ ['--row-inset' as string]: '68px' }}>
+                            {driverRequests.requests.map((req) => (
+                                <div key={req.id} className="list-row items-start py-3.5">
+                                    <Avatar name={req.name} tint="bg-sys-orange" />
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <p className="truncate text-callout font-semibold text-label">{req.name}</p>
+                                            <span className={`pill ${req.status === 'matched' ? 'pill-green' : 'pill-orange'}`}>
+                                                {humanize(req.status)}
+                                            </span>
+                                        </div>
+                                        <p className="truncate text-footnote text-label-2">Pickup · {req.pickup?.name ?? req.station.name}</p>
+                                        <p className="truncate text-footnote text-label-2">
+                                            Station · {req.station.name} · <span className="tabular">{formatDistance(req.distanceMeters)}</span>
+                                        </p>
+                                        <div className="mt-3 flex gap-2">
+                                            <button
+                                                onClick={() => handleAcceptRider(req.id, false)}
+                                                disabled={acceptingRiderId === req.id}
+                                                className="btn btn-filled btn-sm flex-1"
+                                            >
+                                                {acceptingRiderId === req.id ? 'Confirming…' : 'Accept'}
+                                            </button>
+                                            <button
+                                                onClick={() => handleAcceptRider(req.id, true)}
+                                                disabled={acceptingRiderId === req.id}
+                                                className="btn btn-tinted btn-sm !px-3"
+                                                title="Simulate Trip"
+                                            >
+                                                <CirclePlay size={18} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             ))}
                         </div>
                     </div>
                 ) : (
-                    <div className="text-slate-500 text-sm">Tap a station above to see destinations.</div>
+                    <EmptyState icon={<Inbox />} title="No riders queued yet">
+                        Waiting for riders near your stations. Hang tight.
+                    </EmptyState>
                 )}
-                <div className="h-60 rounded-xl overflow-hidden border border-slate-700">
-                    <MapContainer
-                        center={selectedPickup ? [selectedPickup.latitude, selectedPickup.longitude] : [location?.lat ?? 12.8456, location?.lng ?? 77.66]}
-                        zoom={selectedPickup ? 15 : 13}
-                        style={{ height: '100%', width: '100%' }}
-                    >
-                        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
-                        {selectedPickup ? (
-                            <Marker position={[selectedPickup.latitude, selectedPickup.longitude]}>
-                                <Popup>
-                                    <div>
-                                        <p className="font-semibold">{selectedPickup.name}</p>
-                                        <p className="text-xs text-slate-500">Nearest station {selectedPickup.stationName}</p>
-                                    </div>
-                                </Popup>
-                            </Marker>
+            </section>
+        </>
+    );
+
+    const riderBookingCard = (
+        <section className="card">
+            <CardHeader title="Book a ride from Metro" subtitle="Select your metro station and destination." />
+            <form onSubmit={handleBookRide}>
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
+                    <div className="min-w-0 space-y-6">
+                        <div>
+                            <p className="section-label mb-2">Station</p>
+                            <div className="relative mb-3">
+                                <Search className="field-icon" aria-hidden="true" />
+                                <input
+                                    value={pickupQuery}
+                                    onChange={(e) => setPickupQuery(e.target.value)}
+                                    className="field pl-10"
+                                    placeholder="Search Metro Station"
+                                    aria-label="Search metro station"
+                                />
+                            </div>
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                {filteredPickupOptions.map((point: PickupPoint) => (
+                                    <button
+                                        key={point.id}
+                                        type="button"
+                                        aria-pressed={selectedPickupId === point.id}
+                                        onClick={() => {
+                                            setSelectedPickupId(point.id);
+                                            setSelectedDestination(null); // Reset destination when station changes
+                                        }}
+                                        className="chip"
+                                    >
+                                        <span className="chip-check" aria-hidden="true">
+                                            <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                                        </span>
+                                        <span className="min-w-0 flex-1 text-subhead font-semibold">{point.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <p className="section-label mb-2">Destination</p>
+                            {selectedPickup ? (
+                                <div className="flex flex-wrap gap-2 animate-fade">
+                                    {/* Destinations are the nearby areas of the selected station. */}
+                                    {DESTINATIONS.filter(d => d.stationId === selectedPickup.stationId).map((dest) => (
+                                        <button
+                                            key={dest.id}
+                                            type="button"
+                                            aria-pressed={selectedDestination === dest.name}
+                                            onClick={() => setSelectedDestination(dest.name)}
+                                            className="tag"
+                                        >
+                                            {dest.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="px-1 text-subhead text-label-2">Tap a station above to see destinations.</p>
+                            )}
+                        </div>
+                        {bookingError ? (
+                            <div className="notice notice-red" role="alert">
+                                <CircleAlert className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                                <span>{bookingError}</span>
+                            </div>
                         ) : null}
-                        {drivers
-                            .filter((driver) => typeof driver.latitude === 'number' && typeof driver.longitude === 'number')
-                            .map((driver) => (
-                                <Marker key={driver.id} position={[driver.latitude!, driver.longitude!]}>
-                                    <Popup>{driver.name}</Popup>
+                        <button
+                            type="submit"
+                            disabled={bookingLoading}
+                            className="btn btn-filled btn-lg w-full"
+                        >
+                            {bookingLoading ? 'Booking…' : 'Book Ride'}
+                        </button>
+                    </div>
+                    <div className="map-frame h-64 lg:h-auto lg:min-h-[360px]">
+                        <MapContainer
+                            center={selectedPickup ? [selectedPickup.latitude, selectedPickup.longitude] : [location?.lat ?? 12.8456, location?.lng ?? 77.66]}
+                            zoom={selectedPickup ? 15 : 13}
+                            className="absolute inset-0"
+                        >
+                            <BaseTiles />
+                            {selectedPickup ? (
+                                <Marker position={[selectedPickup.latitude, selectedPickup.longitude]} icon={mapIcons.station}>
+                                    <Popup>
+                                        <div>
+                                            <p className="font-semibold">{selectedPickup.name}</p>
+                                            <p className="text-label-2">Nearest station {selectedPickup.stationName}</p>
+                                        </div>
+                                    </Popup>
                                 </Marker>
-                            ))}
-                    </MapContainer>
+                            ) : null}
+                            {drivers
+                                .filter((driver) => typeof driver.latitude === 'number' && typeof driver.longitude === 'number')
+                                .map((driver) => (
+                                    <Marker key={driver.id} position={[driver.latitude!, driver.longitude!]} icon={mapIcons.driver}>
+                                        <Popup>{driver.name}</Popup>
+                                    </Marker>
+                                ))}
+                        </MapContainer>
+                    </div>
                 </div>
-                {bookingError ? <div className="text-sm text-red-300">{bookingError}</div> : null}
-                <button
-                    type="submit"
-                    disabled={bookingLoading}
-                    className="w-full bg-blue-600 hover:bg-blue-700 transition-colors rounded-lg py-2.5 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {bookingLoading ? 'Booking…' : 'Book Ride'}
-                </button>
             </form>
             {bookingState && (
-                <div className="bg-slate-900/40 border border-slate-700 rounded-lg p-4 space-y-2">
-                    <div className="font-semibold">{bookingState.message}</div>
-                    <div className="text-xs text-slate-400">Destination · {bookingState.requestedDestination}</div>
+                <div className="hairline-t mt-6 animate-pop pt-6">
+                    <div className="flex items-start gap-3">
+                        <span className="icon-tile h-9 w-9 rounded-full bg-sys-blue [&>svg]:h-[18px] [&>svg]:w-[18px]" aria-hidden="true">
+                            <CarFront />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <p className="text-headline text-label">{bookingState.message}</p>
+                            <p className="text-footnote text-label-2">Destination · {bookingState.requestedDestination}</p>
+                        </div>
+                    </div>
                     {bookingState.matchedBy && (
-                        <div className="inline-flex items-center gap-2 rounded-full bg-violet-500/15 border border-violet-400/40 px-3 py-1 text-xs text-violet-200">
-                            <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />
-                            Decided by <span className="font-mono">{bookingState.matchedBy}</span>
+                        <div className="ml-12 mt-3 inline-flex items-center gap-2 rounded-full bg-sys-indigo/[var(--tint-a)] px-3 py-1 text-footnote text-indigo-text">
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
+                            Decided by <span className="font-mono font-medium">{bookingState.matchedBy}</span>
                         </div>
                     )}
-                    <div className="space-y-1">
-                        {bookingState.attempts.map((attempt) => (
-                            <div key={attempt.driverId} className="flex justify-between text-sm">
-                                <span className={attempt.accepted ? 'text-emerald-300 font-semibold' : 'text-slate-300'}>
-                                    {attempt.driverName}
-                                </span>
-                                <span className="text-slate-400">
-                                    {attempt.accepted ? 'Accepted' : attempt.reason || 'Pending'}
-                                </span>
-                            </div>
-                        ))}
-                        {bookingState.rejections?.map((r) => (
-                            <div key={`rej-${r.driverId}`} className="flex justify-between gap-3 text-sm">
-                                <span className="text-slate-500 line-through">{r.driverName || r.driverId}</span>
-                                <span className="text-amber-300/80 text-right">{r.reason}</span>
-                            </div>
-                        ))}
-                    </div>
+                    {bookingState.attempts.length || bookingState.rejections?.length ? (
+                        <div className="list mt-4" style={{ ['--row-inset' as string]: '36px' }}>
+                            {bookingState.attempts.map((attempt) => (
+                                <div key={attempt.driverId} className="list-row min-h-[44px] py-2.5">
+                                    <span className={`h-2 w-2 shrink-0 rounded-full ${attempt.accepted ? 'bg-sys-green' : 'bg-sys-gray'}`} aria-hidden="true" />
+                                    <span className={`min-w-0 flex-1 truncate text-subhead ${attempt.accepted ? 'font-semibold text-green-text' : 'text-label'}`}>
+                                        {attempt.driverName}
+                                    </span>
+                                    <span className="text-right text-footnote text-label-2">
+                                        {attempt.accepted ? 'Accepted' : attempt.reason || 'Pending'}
+                                    </span>
+                                </div>
+                            ))}
+                            {bookingState.rejections?.map((r) => (
+                                <div key={`rej-${r.driverId}`} className="list-row min-h-[44px] items-start py-2.5">
+                                    <span className="mt-[7px] h-2 w-2 shrink-0 rounded-full bg-sys-orange" aria-hidden="true" />
+                                    <span className="min-w-0 flex-1 truncate text-subhead text-label-2 line-through">{r.driverName || r.driverId}</span>
+                                    <span className="max-w-[60%] text-right text-footnote text-orange-text">{r.reason}</span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
                 </div>
             )}
             {approvalRequest ? (
-                <div className="bg-blue-500/10 border border-blue-500/40 rounded-lg p-4 space-y-3">
-                    <div>
-                        <p className="font-semibold text-white">{approvalRequest.driverName || 'Driver'} accepted your request</p>
-                        <p className="text-sm text-slate-200">Pickup · {approvalRequest.pickup?.name ?? '—'}</p>
-                        <p className="text-sm text-slate-200">Station · {approvalRequest.station?.name ?? '—'}</p>
+                <section className="mt-6 animate-pop rounded-[16px] bg-sys-blue/[var(--tint-a)] p-4 sm:p-5" aria-label="Ride approval">
+                    <div className="flex items-start gap-3">
+                        <span className="icon-tile h-10 w-10 rounded-full bg-sys-blue [&>svg]:h-5 [&>svg]:w-5" aria-hidden="true">
+                            <CarFront />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <p className="text-headline text-label">{approvalRequest.driverName || 'Driver'} accepted your request</p>
+                            <p className="text-subhead text-label-2">Pickup · {approvalRequest.pickup?.name ?? '—'}</p>
+                            <p className="text-subhead text-label-2">Station · {approvalRequest.station?.name ?? '—'}</p>
+                        </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <button
-                            onClick={() => respondToApproval(approvalRequest.tripId, true)}
-                            className="rounded-lg bg-emerald-500 hover:bg-emerald-600 text-sm font-semibold py-2"
-                        >
-                            Approve ride
-                        </button>
+                    <div className="mt-4 grid grid-cols-2 gap-2">
                         <button
                             onClick={() => respondToApproval(approvalRequest.tripId, false)}
-                            className="rounded-lg bg-slate-900 border border-slate-700 text-sm font-semibold py-2 hover:border-slate-500"
+                            className="btn btn-destructive !bg-grouped-2 hover:!bg-grouped-2/80"
                         >
                             Decline
                         </button>
+                        <button
+                            onClick={() => respondToApproval(approvalRequest.tripId, true)}
+                            className="btn btn-filled"
+                        >
+                            Approve ride
+                        </button>
                     </div>
-                </div>
+                </section>
             ) : null}
             {riderStatus ? (
-                <div className="bg-slate-900/40 border border-blue-500/40 rounded-lg p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                        <span className="font-semibold text-white">Live status · {riderStatus.status}</span>
-                        <span className="text-xs text-slate-400">{new Date(riderStatus.recordedAt).toLocaleTimeString()}</span>
+                <div className="hairline-t mt-6 animate-fade pt-6">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="flex items-center gap-2 text-headline text-label">
+                            Live status
+                            <span className={`pill ${statusTone(riderStatus.status)}`}>{humanize(riderStatus.status)}</span>
+                        </p>
+                        <span className="flex items-center gap-1 text-footnote text-label-2 tabular">
+                            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                            {new Date(riderStatus.recordedAt).toLocaleTimeString()}
+                        </span>
                     </div>
-                    <p className="text-slate-300 text-sm">Driver · {riderStatus.driverId ?? 'Assigning'}</p>
-                    <p className="text-slate-300 text-sm">Pickup · {riderStatus.pickup?.name ?? '—'}</p>
+                    <div className="list">
+                        <KeyValue label="Driver">{riderStatus.driverId ?? 'Assigning'}</KeyValue>
+                        <KeyValue label="Pickup">{riderStatus.pickup?.name ?? '—'}</KeyValue>
+                    </div>
                     {riderStatus.latitude && riderStatus.longitude ? (
-                        <div className="h-48 rounded-lg overflow-hidden border border-slate-700">
-                            <MapContainer center={[riderStatus.latitude, riderStatus.longitude]} zoom={15} style={{ height: '100%', width: '100%' }}>
-                                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
-                                <Marker position={[riderStatus.latitude, riderStatus.longitude]}>
+                        <div className="map-frame mt-3 h-48">
+                            <MapContainer center={[riderStatus.latitude, riderStatus.longitude]} zoom={15} className="absolute inset-0">
+                                <BaseTiles />
+                                <Marker position={[riderStatus.latitude, riderStatus.longitude]} icon={mapIcons.driver}>
                                     <Popup>Driver</Popup>
                                 </Marker>
                                 {riderStatus.pickup?.latitude && riderStatus.pickup.longitude ? (
-                                    <Marker position={[riderStatus.pickup.latitude, riderStatus.pickup.longitude]}>
+                                    <Marker position={[riderStatus.pickup.latitude, riderStatus.pickup.longitude]} icon={mapIcons.station}>
                                         <Popup>{riderStatus.pickup.name}</Popup>
                                     </Marker>
                                 ) : null}
                                 {riderStatus.station?.latitude && riderStatus.station.longitude ? (
-                                    <Marker position={[riderStatus.station.latitude, riderStatus.station.longitude]}>
+                                    <Marker position={[riderStatus.station.latitude, riderStatus.station.longitude]} icon={stationDotIcon}>
                                         <Popup>{riderStatus.station.name}</Popup>
                                     </Marker>
                                 ) : null}
@@ -855,158 +994,203 @@ export function Dashboard() {
                     ) : null}
                 </div>
             ) : null}
-        </div>
+        </section>
     );
 
     const driverRoutePlanner = (
-        <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 space-y-4">
-            <div>
-                <h2 className="text-xl font-bold">Plan your metro route</h2>
-                <p className="text-slate-400 text-sm">Select the Stations you are covering.</p>
-            </div>
-            <div className="space-y-3">
-                <input
-                    value={routeQuery}
-                    onChange={(e) => setRouteQuery(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    placeholder="Search Station"
-                />
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {filteredRouteOptions.map((point: PickupPoint) => (
+        <section className="card">
+            <CardHeader
+                title="Plan your metro route"
+                subtitle="Select the stations you are covering."
+                accessory={
+                    selectedRoutePoints.length ? (
+                        <span className="pill pill-blue">{selectedRoutePoints.length} {selectedRoutePoints.length === 1 ? 'stop' : 'stops'}</span>
+                    ) : null
+                }
+            />
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
+                <div className="min-w-0 space-y-4">
+                    <div className="relative">
+                        <Search className="field-icon" aria-hidden="true" />
+                        <input
+                            value={routeQuery}
+                            onChange={(e) => setRouteQuery(e.target.value)}
+                            className="field pl-10"
+                            placeholder="Search Station"
+                            aria-label="Search station"
+                        />
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {filteredRouteOptions.map((point: PickupPoint) => {
+                            const order = routePickupIds.indexOf(point.id) + 1;
+                            return (
+                                <button
+                                    key={point.id}
+                                    type="button"
+                                    aria-pressed={order > 0}
+                                    onClick={() => toggleRoutePickup(point.id)}
+                                    className="chip"
+                                >
+                                    <span className="chip-check tabular text-caption-2 font-bold" aria-hidden="true">
+                                        {order > 0 ? order : ''}
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block text-subhead font-semibold">{point.name}</span>
+                                        <span className="block truncate text-footnote text-label-2">{point.stationName}</span>
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <p className="px-1 text-footnote text-label-2">
+                        {selectedRoutePoints.length
+                            ? `Stops · ${selectedRoutePoints.map((point) => point.name).join(', ')}`
+                            : 'Tap the stations above to add them to your shuttle route.'}
+                    </p>
+                    <label className="flex min-h-[48px] cursor-text items-center justify-between gap-4 rounded-[12px] bg-fill px-4 transition-shadow focus-within:shadow-[0_0_0_1px_rgb(var(--sys-blue)),0_0_0_4px_rgb(var(--sys-blue)/0.25)]">
+                        <span className="flex items-center gap-2.5 text-callout text-label">
+                            <Users className="h-[18px] w-[18px] text-label-2" aria-hidden="true" />
+                            Seats available
+                        </span>
+                        <input
+                            value={routeSeatCount}
+                            onChange={(e) => setRouteSeatCount(e.target.value)}
+                            inputMode="numeric"
+                            className="w-20 bg-transparent text-right text-callout font-semibold text-label tabular outline-none"
+                            placeholder="Seats"
+                        />
+                    </label>
+                    {routeStatus ? (
+                        <div className={`notice animate-pop ${noticeTone(routeStatus)}`} role="status">
+                            <CircleCheck className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                            <span>{routeStatus}</span>
+                        </div>
+                    ) : null}
+                    <div className="grid gap-2 sm:grid-cols-3">
                         <button
-                            key={point.id}
-                            type="button"
-                            onClick={() => toggleRoutePickup(point.id)}
-                            className={`rounded-lg border px-3 py-2 text-left transition ${routePickupIds.includes(point.id)
-                                ? 'border-emerald-400 bg-emerald-500/10 text-white'
-                                : 'border-slate-700 text-slate-300 hover:border-slate-500'
-                                }`}
+                            onClick={handleSaveRoute}
+                            className="btn btn-filled"
+                            disabled={savingRoute}
                         >
-                            <div className="font-semibold">{point.name}</div>
-                            <div className="text-xs text-slate-400">{point.stationName}</div>
+                            {savingRoute ? 'Saving…' : 'Save Route'}
                         </button>
-                    ))}
+                        <button
+                            onClick={() => handleStartTripPlan(false)}
+                            className="btn btn-tinted"
+                            disabled={startingTrip}
+                        >
+                            {startingTrip ? 'Starting…' : 'Start Trip'}
+                        </button>
+                        <button
+                            onClick={() => handleStartTripPlan(true)}
+                            className="btn btn-tinted"
+                            disabled={startingTrip}
+                        >
+                            <CirclePlay className="h-[18px] w-[18px]" aria-hidden="true" />
+                            Simulated Trip
+                        </button>
+                    </div>
+                    {tripStatus ? (
+                        <div className={`notice animate-pop ${noticeTone(tripStatus)}`} role="status">
+                            <Route className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                            <span>{tripStatus}</span>
+                        </div>
+                    ) : null}
                 </div>
-                {selectedRoutePoints.length ? (
-                    <div className="text-slate-300 text-sm">Stops · {selectedRoutePoints.map((point) => point.name).join(', ')}</div>
-                ) : (
-                    <div className="text-slate-500 text-sm">Tap the chips above to add them to your shuttle route.</div>
-                )}
-                <input
-                    value={routeSeatCount}
-                    onChange={(e) => setRouteSeatCount(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    placeholder="Seats available"
-                />
-                {routeStatus ? <div className="text-sm text-slate-300">{routeStatus}</div> : null}
-                <div className="flex flex-col md:flex-row gap-3">
-                    <button
-                        onClick={handleSaveRoute}
-                        className="flex-1 bg-emerald-500 hover:bg-emerald-600 transition-colors rounded-lg py-2.5 font-semibold text-white"
-                        disabled={savingRoute}
-                    >
-                        {savingRoute ? 'Saving…' : 'Save Route'}
-                    </button>
-                    <button
-                        onClick={() => handleStartTripPlan(false)}
-                        className="flex-1 bg-slate-900 border border-slate-700 hover:border-slate-500 transition-colors rounded-lg py-2.5 font-semibold"
-                        disabled={startingTrip}
-                    >
-                        {startingTrip ? 'Starting…' : 'Start Trip'}
-                    </button>
-                    <button
-                        onClick={() => handleStartTripPlan(true)}
-                        className="flex-1 bg-slate-900 border border-emerald-500 text-emerald-400 hover:bg-emerald-500/10 transition-colors rounded-lg py-2.5 font-semibold"
-                        disabled={startingTrip}
-                    >
-                        Simulated Trip
-                    </button>
-                </div>
-                {tripStatus ? <div className="text-sm text-slate-300">{tripStatus}</div> : null}
-                <div className="h-64 rounded-xl overflow-hidden border border-slate-700">
+                <div className="map-frame h-72 lg:h-auto lg:min-h-[420px]">
                     <MapContainer
                         center={selectedRoutePoints.length ? [selectedRoutePoints[0].latitude, selectedRoutePoints[0].longitude] : [selfDriver?.latitude ?? 12.8456, selfDriver?.longitude ?? 77.66]}
                         zoom={selectedRoutePoints.length ? 14 : 12}
-                        style={{ height: '100%', width: '100%' }}
+                        className="absolute inset-0"
                     >
-                        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
+                        <BaseTiles />
+                        {selectedRoutePoints.length >= 2 ? (
+                            <RouteLine positions={selectedRoutePoints.map((point) => [point.latitude, point.longitude] as [number, number])} />
+                        ) : null}
                         {selfDriver?.latitude && selfDriver.longitude ? (
-                            <Marker position={[selfDriver.latitude, selfDriver.longitude]}>
+                            <Marker position={[selfDriver.latitude, selfDriver.longitude]} icon={mapIcons.driver}>
                                 <Popup>You</Popup>
                             </Marker>
                         ) : null}
-                        {selectedRoutePoints.map((point: PickupPoint) => (
-                            <Marker key={point.id} position={[point.latitude, point.longitude]}>
+                        {selectedRoutePoints.map((point: PickupPoint, index) => (
+                            <Marker key={point.id} position={[point.latitude, point.longitude]} icon={stopIcon(index + 1)}>
                                 <Popup>{point.name}</Popup>
                             </Marker>
                         ))}
-                        {selectedRoutePoints.length >= 2 ? (
-                            <Polyline positions={selectedRoutePoints.map((point) => [point.latitude, point.longitude])} color="#fbbf24" />
-                        ) : null}
                     </MapContainer>
                 </div>
             </div>
-        </div>
+        </section>
     );
 
     const tripRoomsPanel = (
-        <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 space-y-4">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-xl font-bold">Active trip rooms</h2>
-                    <p className="text-slate-400 text-sm">Drivers and riders linked in realtime.</p>
-                </div>
-                <span className="text-xs text-slate-500">{rooms.length ? `${rooms.length} active` : 'No active trips'}</span>
-            </div>
+        <section className="card">
+            <CardHeader
+                title="Active trip rooms"
+                subtitle="Drivers and riders linked in realtime."
+                accessory={
+                    <span className={`pill ${rooms.length ? 'pill-blue' : 'pill-gray'}`}>
+                        {rooms.length ? `${rooms.length} active` : 'No active trips'}
+                    </span>
+                }
+            />
             {rooms.length ? (
-                <div className="grid md:grid-cols-2 gap-4">
+                <div className="grid gap-4 md:grid-cols-2">
                     {rooms.map((room) => {
                         const centerLat = room.latitude ?? room.pickup?.latitude ?? room.station?.latitude ?? 12.8456;
                         const centerLon = room.longitude ?? room.pickup?.longitude ?? room.station?.longitude ?? 77.66;
                         return (
-                            <div key={room.tripId} className="bg-slate-900/40 border border-slate-700 rounded-lg p-4 space-y-3">
-                                <div className="flex justify-between items-center">
-                                    <div>
-                                        <p className="font-semibold text-white">{room.trip?.riderId ?? room.riderId}</p>
-                                        <p className="text-xs text-slate-400">Trip · {room.tripId.slice(0, 8)}</p>
+                            <div key={room.tripId} className="animate-pop overflow-hidden rounded-[14px] bg-grouped-3">
+                                <div className="flex items-start justify-between gap-3 p-4 pb-3">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-callout font-semibold text-label">{room.trip?.riderId ?? room.riderId}</p>
+                                        <p className="font-mono text-caption text-label-2">Trip · {room.tripId.slice(0, 8)}</p>
                                     </div>
-                                    <span className={`text-xs uppercase ${room.status === 'completed' ? 'text-emerald-300' : 'text-amber-300'}`}>
-                                        {room.status}
-                                    </span>
+                                    <span className={`pill ${statusTone(room.status)}`}>{humanize(room.status)}</span>
                                 </div>
-                                <p className="text-sm text-slate-300">Pickup · {room.pickup?.name ?? '—'}</p>
-                                <p className="text-sm text-slate-300">Station · {room.station?.name ?? '—'}</p>
-                                <div className="h-40 rounded-lg overflow-hidden border border-slate-700">
-                                    <MapContainer center={[centerLat, centerLon]} zoom={14} style={{ height: '100%', width: '100%' }}>
-                                        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
-                                        {room.latitude && room.longitude ? (
-                                            <Marker position={[room.latitude, room.longitude]}>
-                                                <Popup>Driver</Popup>
-                                            </Marker>
-                                        ) : null}
+                                <div className="map-frame mx-4 h-40 rounded-[12px]">
+                                    <MapContainer center={[centerLat, centerLon]} zoom={14} className="absolute inset-0">
+                                        <BaseTiles />
                                         {room.pickup?.latitude && room.pickup.longitude ? (
-                                            <Marker position={[room.pickup.latitude, room.pickup.longitude]}>
+                                            <Marker position={[room.pickup.latitude, room.pickup.longitude]} icon={mapIcons.station}>
                                                 <Popup>{room.pickup.name}</Popup>
                                             </Marker>
                                         ) : null}
                                         {room.station?.latitude && room.station.longitude ? (
-                                            <Marker position={[room.station.latitude, room.station.longitude]}>
+                                            <Marker position={[room.station.latitude, room.station.longitude]} icon={stationDotIcon}>
                                                 <Popup>{room.station.name}</Popup>
+                                            </Marker>
+                                        ) : null}
+                                        {room.latitude && room.longitude ? (
+                                            <Marker position={[room.latitude, room.longitude]} icon={mapIcons.driver} zIndexOffset={1000}>
+                                                <Popup>Driver</Popup>
                                             </Marker>
                                         ) : null}
                                         <MapUpdater center={[centerLat, centerLon]} />
                                     </MapContainer>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="px-4 pt-1">
+                                    <div className="flex items-center gap-2 py-1.5 text-footnote">
+                                        <span className="h-2 w-2 shrink-0 rounded-full bg-sys-green" aria-hidden="true" />
+                                        <span className="text-label-2">Pickup</span>
+                                        <span className="min-w-0 truncate font-medium text-label">{room.pickup?.name ?? '—'}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 py-1.5 text-footnote">
+                                        <span className="h-2 w-2 shrink-0 rounded-full bg-sys-indigo" aria-hidden="true" />
+                                        <span className="text-label-2">Station</span>
+                                        <span className="min-w-0 truncate font-medium text-label">{room.station?.name ?? '—'}</span>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 p-4 pt-3">
                                     <button
                                         onClick={() => setActiveRoom({ id: room.tripId, status: { ...room, recordedAt: room.updatedAt || new Date().toISOString() } })}
-                                        className="flex-1 rounded-lg bg-blue-600 text-white py-2 text-sm font-semibold hover:bg-blue-700 transition"
+                                        className="btn btn-filled btn-sm"
                                     >
                                         Resume
                                     </button>
                                     <button
                                         onClick={() => completeTrip(room.tripId)}
-                                        className="w-full rounded-lg border border-slate-600 py-2 text-sm font-semibold hover:border-emerald-400 transition"
+                                        className="btn btn-tinted btn-sm"
                                     >
                                         Mark Complete
                                     </button>
@@ -1016,110 +1200,153 @@ export function Dashboard() {
                     })}
                 </div>
             ) : (
-                <p className="text-slate-500 text-sm">No active socket rooms yet.</p>
+                <EmptyState icon={<Route />} title="No active trips">
+                    No active socket rooms yet.
+                </EmptyState>
             )}
-        </div>
+        </section>
     );
 
     const driverStatusCard = (
-        <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-            <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h2 className="text-xl font-bold mb-1">Current Status</h2>
-                    <div className="flex items-center gap-2">
-                        <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-green-500' : 'bg-slate-500'}`} />
-                        <span className="text-slate-400 capitalize">{status}</span>
+        <section className="card">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                    <span
+                        className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors duration-300 ${isOnline ? 'bg-sys-green text-white' : 'bg-fill text-label-2'}`}
+                        aria-hidden="true"
+                    >
+                        <Power className="h-5 w-5" />
+                    </span>
+                    <div>
+                        <h2 className="card-title">Current Status</h2>
+                        <p className="flex items-center gap-1.5 text-subhead text-label-2">
+                            <span className={`h-2 w-2 rounded-full ${isOnline ? 'bg-sys-green' : 'bg-sys-gray'}`} aria-hidden="true" />
+                            <span className="capitalize">{status}</span>
+                        </p>
                     </div>
                 </div>
                 <button
                     onClick={toggleOnline}
-                    className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${isOnline
-                        ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
-                        : 'bg-green-600 text-white hover:bg-green-700 shadow-lg shadow-green-900/20'
-                        }`}
+                    className={`btn ${isOnline ? 'btn-destructive' : 'btn-filled'}`}
                 >
-                    <Power className="w-5 h-5" />
+                    <Power className="h-[18px] w-[18px]" aria-hidden="true" />
                     {isOnline ? 'Go Offline' : 'Go Online'}
                 </button>
             </div>
 
             {error && (
-                <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4 mb-6 text-red-200 text-sm">
-                    {error}
+                <div className="notice notice-red mt-5" role="alert">
+                    <CircleAlert className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                    <span>{error}</span>
                 </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
-                    <div className="flex items-center gap-3 mb-2">
-                        <MapPin className="w-5 h-5 text-blue-500" />
-                        <span className="text-slate-400 text-sm">Destination</span>
-                    </div>
-                    <p className="font-semibold text-lg">{plannedDestination}</p>
-                </div>
-
-                <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
-                    <div className="flex items-center gap-3 mb-2">
-                        <Users className="w-5 h-5 text-purple-500" />
-                        <span className="text-slate-400 text-sm">Available Seats</span>
-                    </div>
-                    <p className="font-semibold text-lg">{plannedSeats}</p>
-                </div>
-
-                <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
-                    <div className="flex items-center gap-3 mb-2">
-                        <Navigation className="w-5 h-5 text-emerald-500" />
-                        <span className="text-slate-400 text-sm">Location</span>
-                    </div>
-                    <p className="font-mono text-sm text-slate-300">
-                        {location
-                            ? `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`
-                            : 'Waiting for signal...'}
-                    </p>
-                </div>
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Stat icon={<MapPin />} tint="bg-sys-blue" label="Destination">
+                    {plannedDestination}
+                </Stat>
+                <Stat icon={<Users />} tint="bg-sys-indigo" label="Available Seats">
+                    <span className="tabular">{plannedSeats}</span>
+                </Stat>
+                <Stat icon={<Navigation />} tint="bg-sys-green" label="Location">
+                    {location ? (
+                        <span className="font-mono text-callout tabular">{`${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`}</span>
+                    ) : (
+                        <span className="text-callout font-normal text-label-2">Waiting for signal...</span>
+                    )}
+                </Stat>
             </div>
-        </div>
+        </section>
     );
 
     const profilePanel = (
-        <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 space-y-4">
-            <div>
-                <h2 className="text-xl font-bold">Profile</h2>
-                <p className="text-slate-400 text-sm">Your account details and session actions.</p>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-                <div className="bg-slate-900/60 border border-slate-700 rounded-lg p-4">
-                    <p className="text-slate-400 text-xs uppercase">Email</p>
-                    <p className="text-white font-semibold">{user?.email ?? '—'}</p>
-                </div>
-                <div className="bg-slate-900/60 border border-slate-700 rounded-lg p-4">
-                    <p className="text-slate-400 text-xs uppercase">Role</p>
-                    <p className="text-white font-semibold">{isDriver ? 'Driver' : 'Rider'}</p>
+        <section className="card">
+            <div className="mb-6 flex items-center gap-4">
+                <Avatar name={displayName} tint={isDriver ? 'bg-sys-blue' : 'bg-sys-indigo'} size="h-16 w-16 !text-title-3" />
+                <div className="min-w-0">
+                    <h2 className="truncate text-title-2 text-label">{displayName}</h2>
+                    <p className="text-subhead text-label-2">Your account details and session actions.</p>
                 </div>
             </div>
-            <div className="flex flex-wrap gap-3">
-                <button
-                    onClick={toggleOnline}
-                    className="px-4 py-2 rounded-lg border border-slate-600 text-slate-200 hover:border-slate-400 transition"
-                >
-                    {isOnline ? 'Go Offline' : 'Go Online'}
-                </button>
-                <button
-                    onClick={() => signOut()}
-                    className="px-4 py-2 rounded-lg bg-red-500/80 text-white font-semibold hover:bg-red-500 transition"
-                >
-                    Sign Out
-                </button>
+            <div className="grid gap-6 md:grid-cols-2">
+                <div>
+                    <p className="section-label mb-2">Account</p>
+                    <div className="list">
+                        <KeyValue label="Email">{user?.email ?? '—'}</KeyValue>
+                        <KeyValue label="Role">{isDriver ? 'Driver' : 'Rider'}</KeyValue>
+                    </div>
+                </div>
+                <div>
+                    <p className="section-label mb-2">Session</p>
+                    <div className="list">
+                        <button
+                            onClick={toggleOnline}
+                            className="list-row min-h-[44px] w-full py-2.5 text-left text-subhead font-medium text-blue-text transition-colors hover:bg-fill"
+                        >
+                            <Power className="h-[18px] w-[18px]" aria-hidden="true" />
+                            {isOnline ? 'Go Offline' : 'Go Online'}
+                        </button>
+                        <button
+                            onClick={() => signOut()}
+                            className="list-row min-h-[44px] w-full py-2.5 text-left text-subhead font-medium text-red-text transition-colors hover:bg-fill"
+                        >
+                            <LogOut className="h-[18px] w-[18px]" aria-hidden="true" />
+                            Sign Out
+                        </button>
+                    </div>
+                </div>
             </div>
-        </div>
+        </section>
     );
+
+    const locationCard = (
+        <section className="card">
+            <CardHeader
+                title="Your location"
+                subtitle={
+                    location
+                        ? `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`
+                        : error
+                            ? 'Location is unavailable in this browser.'
+                            : 'Acquiring location…'
+                }
+                accessory={
+                    location ? (
+                        <span className="pill pill-green">
+                            <span className="pill-dot" aria-hidden="true" />
+                            {simulating ? 'Simulated' : 'Live'}
+                        </span>
+                    ) : null
+                }
+            />
+            <div className={`map-frame transition-[height] duration-300 ${location ? 'h-[360px] sm:h-[420px]' : 'h-[200px]'}`}>
+                {location ? (
+                    <MapContainer center={[location.lat, location.lng]} zoom={15} className="absolute inset-0">
+                        <BaseTiles />
+                        <Marker position={[location.lat, location.lng]} icon={mapIcons.user}>
+                            <Popup>
+                                {isDriver ? 'You are here' : 'Your Location'}
+                            </Popup>
+                        </Marker>
+                        <MapUpdater center={[location.lat, location.lng]} />
+                    </MapContainer>
+                ) : (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
+                        <LocateFixed className={`h-8 w-8 text-label-2 ${error ? '' : 'animate-breathe'}`} aria-hidden="true" />
+                        <p className="max-w-xs text-subhead text-label-2">{error ? error : 'Acquiring location...'}</p>
+                    </div>
+                )}
+            </div>
+        </section>
+    );
+
     const renderDriverContent = () => {
         switch (activeTab) {
             case 'dashboard':
                 return (
                     <>
-                        {driverNetworkCard}
                         {driverStatusCard}
+                        {driverNetworkCard}
                     </>
                 );
             case 'riders':
@@ -1128,7 +1355,7 @@ export function Dashboard() {
                 return (
                     <>
                         {driverRoutePlanner}
-                        <div className="mt-6">{tripRoomsPanel}</div>
+                        {tripRoomsPanel}
                     </>
                 );
             case 'profile':
@@ -1149,79 +1376,81 @@ export function Dashboard() {
             default:
                 return (
                     <>
-                        {driverNetworkCard}
                         {riderBookingCard}
+                        {driverNetworkCard}
                     </>
                 );
         }
     };
 
+    const pageSubtitles: Record<string, string> = isDriver
+        ? {
+            dashboard: 'Your status and the drivers around you.',
+            riders: 'Offers and riders queued along your stations.',
+            trips: 'Plan a route, start a trip and follow live rooms.',
+            profile: 'Your account and session.',
+        }
+        : {
+            dashboard: 'Book a ride and see drivers nearby.',
+            drivers: 'Drivers reported live by the gateway.',
+            book: 'Pick your station and where you’re headed.',
+            profile: 'Your account and session.',
+        };
+    const activeTabLabel = tabs.find((tab) => tab.key === activeTab)?.label ?? 'Dashboard';
+
     return (
-        <div className="min-h-screen bg-slate-900 text-white">
-            {/* Header */}
-            <header className="bg-slate-800 border-b border-slate-700 p-4">
-                <div className="max-w-7xl mx-auto flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isDriver ? 'bg-blue-600' : 'bg-purple-600'}`}>
-                            {isDriver ? <Navigation className="w-6 h-6 text-white" /> : <Search className="w-6 h-6 text-white" />}
+        <div className="min-h-screen bg-grouped text-label">
+            {/* Translucent navigation bar */}
+            <header className="material hairline-b sticky top-0 z-[1000]">
+                <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2.5 px-4 py-2.5 sm:px-6">
+                    <div className="flex min-w-0 flex-1 items-center gap-3 md:flex-none md:basis-64">
+                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-white ${isDriver ? 'bg-accent' : 'bg-sys-indigo'}`} aria-hidden="true">
+                            {isDriver ? <Navigation className="h-[18px] w-[18px]" /> : <Search className="h-[18px] w-[18px]" />}
                         </div>
-                        <div>
-                            <h1 className="font-bold text-lg">{isDriver ? 'Driver Console' : 'Rider App'}</h1>
-                            <p className="text-xs text-slate-400">{user?.email}</p>
-                            <p className="text-[11px] uppercase tracking-wide text-slate-500">Logged in as {isDriver ? 'Driver' : 'Rider'}</p>
+                        <div className="min-w-0">
+                            <p className="truncate text-headline text-label">{isDriver ? 'Driver Console' : 'Rider App'}</p>
+                            <p className="truncate text-caption text-label-2">
+                                <span className="sr-only">Logged in as {isDriver ? 'Driver' : 'Rider'} · </span>
+                                {user?.email}
+                            </p>
                         </div>
                     </div>
-                    <button
-                        onClick={() => signOut()}
-                        className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
-                    >
-                        <LogOut className="w-5 h-5 text-slate-400" />
-                    </button>
+                    <nav aria-label="Sections" className="order-last w-full md:order-none md:flex md:w-auto md:flex-1 md:justify-center">
+                        <SegmentedControl
+                            ariaLabel="Sections"
+                            options={tabs}
+                            value={activeTab}
+                            onChange={setActiveTab}
+                            className="w-full md:w-[440px]"
+                        />
+                    </nav>
+                    <div className="flex shrink-0 items-center justify-end gap-2 md:basis-64">
+                        <span className={`pill hidden sm:inline-flex ${realtimeReady ? 'pill-green' : 'pill-gray'}`} title="Realtime connection">
+                            <span className={`pill-dot ${realtimeReady ? '' : 'animate-breathe'}`} aria-hidden="true" />
+                            {isDriver ? 'Driver' : 'Rider'}
+                        </span>
+                        <button
+                            onClick={() => signOut()}
+                            className="icon-btn"
+                            aria-label="Sign out"
+                            title="Sign out"
+                        >
+                            <LogOut className="h-[18px] w-[18px]" aria-hidden="true" />
+                        </button>
+                    </div>
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto p-4 space-y-6">
-                <div className="flex flex-wrap gap-2">
-                    {tabs.map((tab) => {
-                        const active = activeTab === tab.key;
-                        return (
-                            <button
-                                key={tab.key}
-                                onClick={() => setActiveTab(tab.key)}
-                                className={`px-4 py-2 rounded-lg text-sm font-semibold border transition ${active
-                                    ? 'bg-blue-600 border-blue-400 text-white'
-                                    : 'border-slate-700 text-slate-300 hover:border-slate-500'
-                                    }`}
-                            >
-                                {tab.label}
-                            </button>
-                        );
-                    })}
+            <main className="mx-auto max-w-6xl px-4 pb-[max(4rem,env(safe-area-inset-bottom))] sm:px-6">
+                <div className="pb-5 pt-7 sm:pt-9">
+                    <h1 className="text-large-title text-label">{activeTabLabel}</h1>
+                    <p className="mt-1 text-callout text-label-2">{pageSubtitles[activeTab] ?? ''}</p>
                 </div>
 
-                {isDriver ? renderDriverContent() : renderRiderContent()}
-
-                {/* Map View */}
-                <div className="bg-slate-800 rounded-xl p-1 border border-slate-700 h-[500px] overflow-hidden relative z-0">
-                    {location ? (
-                        <MapContainer center={[location.lat, location.lng]} zoom={15} style={{ height: '100%', width: '100%' }}>
-                            <TileLayer
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                            />
-                            <Marker position={[location.lat, location.lng]}>
-                                <Popup>
-                                    {isDriver ? 'You are here' : 'Your Location'}
-                                </Popup>
-                            </Marker>
-                            <MapUpdater center={[location.lat, location.lng]} />
-                        </MapContainer>
-                    ) : (
-                        <div className="h-full flex items-center justify-center text-slate-400">
-                            {error ? error : 'Acquiring location...'}
-                        </div>
-                    )}
+                <div key={activeTab} className="animate-in space-y-6">
+                    {isDriver ? renderDriverContent() : renderRiderContent()}
                 </div>
+                <div className="mt-6">{locationCard}</div>
             </main>
             {activeRoom && (
                 <Room

@@ -9,7 +9,12 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
 
   if (loading) {
-    return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Loading...</div>;
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-grouped text-label-2" role="status">
+        <span className="spinner" aria-hidden="true" />
+        <span className="text-footnote">Loading…</span>
+      </div>
+    );
   }
 
   if (!session) {

@@ -46,7 +46,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   try {
     return JSON.parse(raw) as T;
-  } catch (err) {
+  } catch {
     throw new Error(`Invalid JSON from ${path}: ${raw.substring(0, 120)}`);
   }
 }

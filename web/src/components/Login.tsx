@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Car, Mail, Lock, AlertCircle } from 'lucide-react';
+import { Car, Mail, Lock, AlertCircle, ChevronRight } from 'lucide-react';
 import { signIn, signUp } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
+import { SegmentedControl } from './SegmentedControl';
 
 // Seeded by the User service when it runs without Supabase (demo mode).
 const DEMO_ACCOUNTS: { label: string; email: string; role: 'rider' | 'driver' }[] = [
@@ -11,6 +12,11 @@ const DEMO_ACCOUNTS: { label: string; email: string; role: 'rider' | 'driver' }[
     { label: 'Priya · rider', email: 'rider@lastmile.demo', role: 'rider' },
     { label: 'Kabir · rider', email: 'rider2@lastmile.demo', role: 'rider' },
 ];
+
+const ROLE_OPTIONS = [
+    { key: 'rider', label: 'Rider' },
+    { key: 'driver', label: 'Driver' },
+] as const;
 
 export function Login() {
     const [email, setEmail] = useState('');
@@ -59,114 +65,113 @@ export function Login() {
     };
 
     return (
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-            <div className="bg-slate-800 p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-700">
-                <div className="flex flex-col items-center mb-8">
-                    <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mb-4">
-                        <Car className="w-8 h-8 text-white" />
+        <div className="flex min-h-screen items-start justify-center bg-grouped px-4 py-10 sm:items-center sm:py-12">
+            <div className="w-full max-w-[400px] animate-in">
+                <div className="mb-8 flex flex-col items-center text-center">
+                    <div className="mb-5 flex h-[72px] w-[72px] items-center justify-center rounded-[18px] bg-accent text-white shadow-float">
+                        <Car className="h-9 w-9" strokeWidth={2} aria-hidden="true" />
                     </div>
-                    <h1 className="text-2xl font-bold text-white">LastMile</h1>
-                    <p className="text-slate-400 mt-2">
-                        {isSignUp ? 'Create an account' : 'Sign in to continue'}
+                    <h1 className="text-large-title text-label">LastMile</h1>
+                    <p className="mt-1.5 text-callout text-label-2">
+                        {isSignUp ? 'Create an account to get started.' : 'Rides from the metro, matched as your driver arrives.'}
                     </p>
                 </div>
 
                 {error && (
-                    <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4 mb-6 flex items-start gap-3">
-                        <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                        <p className="text-red-200 text-sm">{error}</p>
+                    <div role="alert" className="notice notice-red mb-4 animate-pop">
+                        <AlertCircle className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                        <p>{error}</p>
                     </div>
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="mb-2">
-                        <p className="text-xs text-slate-400 uppercase tracking-wide mb-2">Log in as</p>
-                        <div className="flex bg-slate-900 p-1 rounded-lg">
-                            <button
-                                type="button"
-                                onClick={() => setRole('rider')}
-                                className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${role === 'rider'
-                                        ? 'bg-slate-700 text-white shadow-sm'
-                                        : 'text-slate-400 hover:text-slate-200'
-                                    }`}
-                            >
-                                Rider
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setRole('driver')}
-                                className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${role === 'driver'
-                                        ? 'bg-blue-600 text-white shadow-sm'
-                                        : 'text-slate-400 hover:text-slate-200'
-                                    }`}
-                            >
-                                Driver
-                            </button>
-                        </div>
+                    <div>
+                        <p className="section-label mb-2">{isSignUp ? 'Sign up as' : 'Log in as'}</p>
+                        <SegmentedControl
+                            ariaLabel="Account type"
+                            options={ROLE_OPTIONS}
+                            value={role}
+                            onChange={(key) => setRole(key as 'rider' | 'driver')}
+                            size="large"
+                        />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">
-                            Email Address
-                        </label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                    <div
+                        className="list-plain transition-shadow duration-200 focus-within:shadow-[0_0_0_1px_rgb(var(--sys-blue)),0_0_0_4px_rgb(var(--sys-blue)/0.25)]"
+                        style={{ ['--row-inset' as string]: '48px' }}
+                    >
+                        <label className="list-row cursor-text py-0">
+                            <Mail className="h-[18px] w-[18px] shrink-0 text-label-2" aria-hidden="true" />
+                            <span className="sr-only">Email address</span>
                             <input
                                 type="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 pl-10 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="driver@example.com"
+                                className="min-h-[50px] w-full bg-transparent text-body text-label outline-none"
+                                placeholder="Email address"
+                                autoComplete="email"
                                 required
                             />
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">
-                            Password
                         </label>
-                        <div className="relative">
-                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                        <label className="list-row cursor-text py-0">
+                            <Lock className="h-[18px] w-[18px] shrink-0 text-label-2" aria-hidden="true" />
+                            <span className="sr-only">Password</span>
                             <input
                                 type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 pl-10 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="••••••••"
+                                className="min-h-[50px] w-full bg-transparent text-body text-label outline-none"
+                                placeholder="Password"
+                                autoComplete={isSignUp ? 'new-password' : 'current-password'}
                                 required
                             />
-                        </div>
+                        </label>
                     </div>
 
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
+                    <button type="submit" disabled={loading} className="btn btn-filled btn-lg w-full">
+                        {loading ? <span className="spinner !border-white/30 !border-t-white" aria-hidden="true" /> : null}
                         {loading ? 'Processing...' : isSignUp ? 'Create Account' : 'Sign In'}
                     </button>
                 </form>
 
                 {!isSignUp && (
-                    <div className="mt-6 rounded-lg border border-slate-700 bg-slate-900/60 p-3">
-                        <p className="text-xs text-slate-400 uppercase tracking-wide mb-2">Demo accounts (password: lastmile)</p>
-                        <div className="grid grid-cols-2 gap-2">
-                            {DEMO_ACCOUNTS.map((account) => (
-                                <button
-                                    key={account.email}
-                                    type="button"
-                                    onClick={() => {
-                                        setEmail(account.email);
-                                        setPassword('lastmile');
-                                        setRole(account.role);
-                                    }}
-                                    className="rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1.5 text-left text-xs text-slate-200"
-                                >
-                                    <span className="block font-semibold">{account.label}</span>
-                                    <span className="text-slate-500">{account.email}</span>
-                                </button>
-                            ))}
+                    <div className="mt-8">
+                        <div className="mb-2 flex items-baseline justify-between px-1">
+                            <p className="section-label px-0">Demo accounts</p>
+                            <p className="text-footnote text-label-2">Password: lastmile</p>
+                        </div>
+                        <div className="list-plain" style={{ ['--row-inset' as string]: '64px' }}>
+                            {DEMO_ACCOUNTS.map((account) => {
+                                const selected = email === account.email;
+                                return (
+                                    <button
+                                        key={account.email}
+                                        type="button"
+                                        onClick={() => {
+                                            setEmail(account.email);
+                                            setPassword('lastmile');
+                                            setRole(account.role);
+                                        }}
+                                        className="list-row w-full text-left transition-colors duration-200 hover:bg-fill active:bg-fill-2"
+                                    >
+                                        <span
+                                            aria-hidden="true"
+                                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-subhead font-semibold text-white ${account.role === 'driver' ? 'bg-sys-blue' : 'bg-sys-indigo'}`}
+                                        >
+                                            {account.label.charAt(0)}
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block text-callout font-semibold text-label">{account.label}</span>
+                                            <span className="block truncate text-footnote text-label-2">{account.email}</span>
+                                        </span>
+                                        {selected ? (
+                                            <span className="pill pill-blue">Selected</span>
+                                        ) : (
+                                            <ChevronRight className="h-[18px] w-[18px] shrink-0 text-label-3" aria-hidden="true" />
+                                        )}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                 )}
@@ -174,7 +179,7 @@ export function Login() {
                 <div className="mt-6 text-center">
                     <button
                         onClick={() => setIsSignUp(!isSignUp)}
-                        className="text-slate-400 hover:text-white text-sm transition-colors"
+                        className="btn btn-plain btn-sm"
                     >
                         {isSignUp
                             ? 'Already have an account? Sign in'

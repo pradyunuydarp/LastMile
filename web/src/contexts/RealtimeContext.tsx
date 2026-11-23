@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import io from 'socket.io-client';
-import type { DriverRequestsResponse, PickupPoint, Station, Trip } from '../lib/types';
+import type { DriverRequestsResponse, PickupPoint, Station, Trip, TripStatusPayload } from '../lib/types';
 import { useAuth } from './AuthContext';
 
 type DriverOffer = {
@@ -9,6 +9,22 @@ type DriverOffer = {
     destination?: string;
     pickupId?: string;
     pickupName?: string;
+    pickup?: PickupPoint;
+    station?: Station;
+    attempt: number;
+    total: number;
+};
+
+/** Shape of the gateway's driver:rider-offer event (internal/api/realtime.go). */
+type DriverOfferPayload = {
+    rider: {
+        id: string;
+        name?: string;
+        destination?: string;
+        pickupId?: string;
+        pickupName?: string;
+        status?: string;
+    };
     pickup?: PickupPoint;
     station?: Station;
     attempt: number;
@@ -58,7 +74,7 @@ export type ApproachAlert = {
 };
 
 type RealtimeContextValue = {
-    socket: any | null;
+    socket: SocketIOClient.Socket | null;
     approachAlert: ApproachAlert | null;
     ready: boolean;
     offers: DriverOffer[];
@@ -78,7 +94,7 @@ const isNgrok = baseGatewayUrl.includes('ngrok');
 
 export const RealtimeProvider = ({ children }: { children: React.ReactNode }) => {
     const { user, role } = useAuth();
-    const [socket, setSocket] = useState<any | null>(null);
+    const [socket, setSocket] = useState<SocketIOClient.Socket | null>(null);
     const [ready, setReady] = useState(false);
     const [queueSummary, setQueueSummary] = useState<DriverRequestsResponse | null>(null);
     const offersRef = useRef<Record<string, DriverOffer>>({});
@@ -91,6 +107,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
 
     useEffect(() => {
         if (!user?.id || !role) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- this effect owns the socket.io client: resets on sign-out, publishes the new client to state
             setQueueSummary(null);
             setReady(false);
             if (socket) {
@@ -134,7 +151,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
         client.on('driver:approaching-station', (payload: Omit<ApproachAlert, 'receivedAt'>) => {
             setApproachAlert({ ...payload, receivedAt: Date.now() });
         });
-        client.on('driver:rider-offer', (payload: any) => {
+        client.on('driver:rider-offer', (payload: DriverOfferPayload) => {
             const rider = payload?.rider ?? {};
             const offer: DriverOffer = {
                 riderId: rider.id,
@@ -150,7 +167,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
             offersRef.current = { ...offersRef.current, [offer.riderId]: offer };
             setOffersVersion((n) => n + 1);
         });
-        client.on('trip:room-created', (payload: any) => {
+        client.on('trip:room-created', (payload: TripStatusPayload) => {
             const tripId = payload?.tripId ?? payload?.trip?.id;
             if (!tripId) {
                 return;
@@ -179,7 +196,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
             };
             setRoomsVersion((n) => n + 1);
         });
-        client.on('trip:location', (payload: any) => {
+        client.on('trip:location', (payload: TripStatusPayload) => {
             const tripId = payload?.tripId;
             if (!tripId) {
                 return;
@@ -203,7 +220,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
             };
             setRoomsVersion((n) => n + 1);
         });
-        client.on('trip:status', (payload: any) => {
+        client.on('trip:status', (payload: TripStatusPayload) => {
             const tripId = payload?.tripId;
             if (!tripId) {
                 return;
@@ -234,10 +251,10 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
         client.on('rider:status', (payload: RiderStatus) => {
             setRiderStatus(payload);
         });
-        client.on('driver:rider-error', (payload: any) => {
+        client.on('driver:rider-error', (payload: { message?: string }) => {
             console.warn('[realtime] driver error', payload);
         });
-        client.on('rider:approval-request', (payload: any) => {
+        client.on('rider:approval-request', (payload: ApprovalRequest) => {
             if (!payload?.tripId) {
                 return;
             }
@@ -254,6 +271,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
             client.disconnect();
             setSocket(null);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- reconnect only when identity changes; adding `socket` (set by this effect) would loop
     }, [user?.id, role]);
 
     const respondToOffer = useCallback(
@@ -293,12 +311,15 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
             return;
         }
         if (approvalRequest.tripId === riderStatus.tripId && riderStatus.status !== 'awaiting_rider') {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- drops a stale prompt once rider:status moves past awaiting_rider; kept as an effect to preserve timing
             setApprovalRequest(null);
         }
     }, [approvalRequest, riderStatus]);
 
 
+    // eslint-disable-next-line react-hooks/refs, react-hooks/exhaustive-deps -- socket handlers mutate offersRef then bump offersVersion, the real recompute signal
     const offers = useMemo(() => Object.values(offersRef.current), [offersVersion, ready]);
+    // eslint-disable-next-line react-hooks/refs, react-hooks/exhaustive-deps -- socket handlers mutate roomsRef then bump roomsVersion, the real recompute signal
     const rooms = useMemo(() => Object.values(roomsRef.current), [roomsVersion, ready]);
 
     const value = useMemo<RealtimeContextValue>(
@@ -321,6 +342,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
     return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 };
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook is co-located with its provider; only affects dev HMR
 export const useRealtime = () => {
     const context = useContext(RealtimeContext);
     if (!context) {

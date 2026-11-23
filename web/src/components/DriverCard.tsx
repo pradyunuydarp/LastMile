@@ -4,36 +4,62 @@ interface DriverCardProps {
   driver: Driver;
 }
 
+const initials = (name: string) =>
+  name
+    .replace(/\(.*?\)/g, '')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('') || '?';
+
+const statusPill = (status: string) => {
+  const value = status.toLowerCase();
+  if (value.includes('offline') || value.includes('inactive')) return 'pill-gray';
+  if (value.includes('trip') || value.includes('busy') || value.includes('pickup')) return 'pill-orange';
+  return 'pill-green';
+};
+
+/** One driver, rendered as a row of an inset grouped list. */
 export function DriverCard({ driver }: DriverCardProps) {
   return (
-    <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 shadow-lg shadow-black/20">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-base font-semibold text-white">{driver.name}</p>
-          <p className="text-sm text-slate-400">{driver.carDetails}</p>
+    <div className="list-row items-start py-3.5">
+      <span
+        aria-hidden="true"
+        className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sys-blue text-footnote font-semibold text-white"
+      >
+        {initials(driver.name)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-callout font-semibold text-label">{driver.name}</p>
+            <p className="truncate text-footnote text-label-2">{driver.carDetails}</p>
+          </div>
+          <span className={`pill ${statusPill(driver.status)}`}>
+            <span className="pill-dot" aria-hidden="true" />
+            {driver.status.replace('_', ' ')}
+          </span>
         </div>
-        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-300">
-          {driver.status.replace('_', ' ')}
-        </span>
-      </div>
 
-      <div className="grid grid-cols-2 gap-4 mt-4 text-sm text-slate-300">
-        <div>
-          <p className="text-slate-500 text-xs uppercase tracking-wide">Destination</p>
-          <p className="font-medium text-white">{driver.route.destination}</p>
-        </div>
-        <div>
-          <p className="text-slate-500 text-xs uppercase tracking-wide">ETA</p>
-          <p className="font-medium text-white">{driver.etaMinutes} min</p>
-        </div>
-        <div>
-          <p className="text-slate-500 text-xs uppercase tracking-wide">Seats</p>
-          <p className="font-medium text-white">{driver.seatsAvailable}</p>
-        </div>
-        <div>
-          <p className="text-slate-500 text-xs uppercase tracking-wide">Stations</p>
-          <p className="font-medium text-white truncate">{driver.route.targetStationIds.join(', ')}</p>
-        </div>
+        <dl className="mt-2.5 grid grid-cols-3 gap-x-4 gap-y-2 text-footnote">
+          <div className="min-w-0">
+            <dt className="text-label-2">Destination</dt>
+            <dd className="truncate font-medium text-label">{driver.route.destination}</dd>
+          </div>
+          <div>
+            <dt className="text-label-2">ETA</dt>
+            <dd className="tabular font-medium text-label">{driver.etaMinutes} min</dd>
+          </div>
+          <div>
+            <dt className="text-label-2">Seats</dt>
+            <dd className="tabular font-medium text-label">{driver.seatsAvailable}</dd>
+          </div>
+          <div className="col-span-3 min-w-0">
+            <dt className="sr-only">Stations</dt>
+            <dd className="truncate text-label-2">{driver.route.targetStationIds.join(' · ')}</dd>
+          </div>
+        </dl>
       </div>
     </div>
   );

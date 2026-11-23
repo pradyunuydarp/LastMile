@@ -1,40 +1,14 @@
 
-import { useEffect, useState, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { Navigation, Phone, MessageSquare, Shield, Star, MapPin, Users, Minimize2, Zap } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
+import type { CSSProperties } from 'react';
+import { MapContainer, Marker, Popup } from 'react-leaflet';
+import { Navigation, Phone, MessageSquare, Shield, Star, MapPin, Users, Minimize2, Zap, CircleCheck } from 'lucide-react';
 import { useRealtime } from '../contexts/RealtimeContext';
 import { useAuth } from '../contexts/AuthContext';
 import type { TripStatusPayload } from '../lib/types';
 import { DESTINATIONS } from '../lib/destinations';
-import L from 'leaflet';
-
-// Car icon for driver
-const carIcon = L.divIcon({
-    className: 'custom-car-icon transition-marker',
-    html: `<div class="bg-blue-600 text-white p-2 rounded-full shadow-lg border-2 border-white transform -translate-x-1/2 -translate-y-1/2">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></svg>
-    </div>`,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
-});
-
-// Pin icon for rider/station
-const pinIcon = L.divIcon({
-    className: 'custom-pin-icon transition-marker',
-    html: `<div class="bg-emerald-500 text-white p-2 rounded-full shadow-lg border-2 border-white transform -translate-x-1/2 -translate-y-1/2">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-    </div>`,
-    iconSize: [32, 32],
-    iconAnchor: [16, 30],
-});
-
-function MapUpdater({ center }: { center: [number, number] }) {
-    const map = useMap();
-    useEffect(() => {
-        map.setView(center, map.getZoom());
-    }, [center, map]);
-    return null;
-}
+import { BaseTiles, MapUpdater } from './MapTiles';
+import { mapIcons } from './mapIcons';
 
 interface RoomProps {
     tripId: string;
@@ -44,11 +18,6 @@ interface RoomProps {
 }
 
 export function Room({ tripId, initialStatus, onClose, seats }: RoomProps) {
-    // Suppress unused warning or implement logic
-    useEffect(() => {
-        // Mock usage to suppress warning until close logic is implemented
-        if (false) onClose();
-    }, [onClose]);
     const { user } = useAuth();
     const { socket } = useRealtime();
     const [status, setStatus] = useState<TripStatusPayload>(initialStatus);
@@ -114,164 +83,189 @@ export function Room({ tripId, initialStatus, onClose, seats }: RoomProps) {
         }
     };
 
-    return (
-        <div className="fixed inset-0 z-[2000] bg-slate-900 flex flex-col">
-            <style>{`
-                .transition-marker {
-                    transition: transform 1s linear;
-                }
-            `}</style>
-            {/* Header */}
-            <div className="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center shadow-lg z-10">
-                <div>
-                    <h2 className="text-lg font-bold text-white">
-                        {status.status === 'completed' ? 'Trip Completed' : 'In Ride'}
-                    </h2>
-                    <p className="text-sm text-slate-400">
-                        {status.status === 'awaiting_pickup' ? 'Heading to pickup' : 'On the way to destination'}
-                    </p>
-                </div>
-                <div className="flex bg-slate-700 rounded-lg p-1 gap-1">
-                    {isDriver && (
-                        <button
-                            onClick={() => handleAction('simulate')}
-                            className="p-2 text-slate-300 hover:text-white transition"
-                            title="Fast Forward Simulation"
-                        >
-                            <Zap size={20} />
-                        </button>
-                    )}
-                    <button onClick={onClose} className="p-2 text-slate-300 hover:text-white transition" title="Minimize">
-                        <Minimize2 size={20} />
-                    </button>
-                    <button className="p-2 text-slate-300 hover:text-white transition">
-                        <Phone size={20} />
-                    </button>
-                    <button className="p-2 text-slate-300 hover:text-white transition">
-                        <MessageSquare size={20} />
-                    </button>
-                    <button className="p-2 text-slate-300 hover:text-white transition">
-                        <Shield size={20} />
-                    </button>
-                </div>
-            </div>
+    // Keep Leaflet's attribution visible above the bottom sheet on phones.
+    const sheetRef = useRef<HTMLDivElement | null>(null);
+    const [sheetHeight, setSheetHeight] = useState(0);
+    useLayoutEffect(() => {
+        const node = sheetRef.current;
+        if (!node || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(() => setSheetHeight(node.offsetHeight));
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, []);
 
+    const completed = status.status === 'completed';
+    const awaitingPickup = status.status === 'awaiting_pickup' || status.status === 'pending';
+    const statusLabel = completed
+        ? 'Completed'
+        : awaitingPickup
+            ? 'Heading to pickup'
+            : status.status === 'in_progress'
+                ? 'On trip'
+                : (status.status ?? '').replace(/_/g, ' ');
+    const statusPill = completed ? 'pill-green' : awaitingPickup ? 'pill-orange' : 'pill-blue';
+
+    return (
+        <div
+            className="room-map fixed inset-0 z-[2000] bg-grouped animate-fade"
+            style={{ '--sheet-h': `${sheetHeight}px` } as CSSProperties}
+        >
             {/* Map Area */}
-            <div className="flex-1 relative">
+            <div className="absolute inset-0">
                 <MapContainer
                     center={driverLocation || [12.9716, 77.5946]}
                     zoom={15}
-                    style={{ height: '100%', width: '100%' }}
+                    className="absolute inset-0"
                     zoomControl={false}
                 >
-                    <TileLayer
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        attribution='&copy; OpenStreetMap contributors'
-                    />
+                    <BaseTiles />
 
-                    {/* Driver Marker */}
-                    {driverLocation && (
-                        <Marker position={driverLocation} icon={carIcon} zIndexOffset={1000}>
-                            <Popup>Driver</Popup>
-                        </Marker>
-                    )}
-
-                    {/* Pickup Point (Station) - Use Pin Icon */}
+                    {/* Pickup Point (Station) */}
                     {status.pickup && status.pickup.latitude && status.pickup.longitude && (
-                        <Marker position={[status.pickup.latitude, status.pickup.longitude]} icon={pinIcon}>
+                        <Marker position={[status.pickup.latitude, status.pickup.longitude]} icon={mapIcons.station}>
                             <Popup>Pickup: {status.pickup.name}</Popup>
                         </Marker>
                     )}
 
                     {/* Dropoff Point (Destination) */}
                     {destinationPoint ? (
-                        <Marker position={[destinationPoint.latitude, destinationPoint.longitude]}>
+                        <Marker position={[destinationPoint.latitude, destinationPoint.longitude]} icon={mapIcons.destination}>
                             <Popup>Dropoff: {destinationPoint.name}</Popup>
                         </Marker>
-                    ) : (
-                        /* Fallback if we don't have dest coords but have station coords and we passed that as station? 
-                           Actually status.station IS available usually. If station is start, we don't need dropoff marker if we don't have it. 
-                        */
-                        null
+                    ) : null}
+
+                    {/* Driver Marker */}
+                    {driverLocation && (
+                        <Marker position={driverLocation} icon={mapIcons.car} zIndexOffset={1000}>
+                            <Popup>Driver</Popup>
+                        </Marker>
                     )}
 
                     {driverLocation && <MapUpdater center={driverLocation} />}
                 </MapContainer>
+            </div>
 
-                {/* Status Overlay */}
-                <div className="absolute top-4 left-4 right-4 md:w-96 md:left-4 pointer-events-none">
-                    <div className="bg-slate-800/90 backdrop-blur border border-slate-700 rounded-xl p-4 shadow-xl pointer-events-auto">
-                        <div className="flex items-center gap-4 mb-3">
-                            <div className="h-12 w-12 rounded-full bg-slate-700 flex items-center justify-center">
-                                <Users className="text-slate-400" />
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-white">{partnerName}</h3>
-                                <div className="flex items-center text-yellow-400 text-xs gap-1">
-                                    <Star size={12} fill="currentColor" />
-                                    <span>4.9</span>
-                                </div>
+            {/* Navigation bar (material over the map) */}
+            <header className="material hairline-b absolute inset-x-0 top-0 z-[1000] pt-[env(safe-area-inset-top)]">
+                <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
+                    <div className="min-w-0">
+                        <h2 className="truncate text-title-3 text-label">
+                            {status.status === 'completed' ? 'Trip Completed' : 'In Ride'}
+                        </h2>
+                        <p className="truncate text-footnote text-label-2">
+                            {completed ? 'You’ve arrived' : status.status === 'awaiting_pickup' ? 'Heading to pickup' : 'On the way to destination'}
+                        </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                        {isDriver && (
+                            <button
+                                onClick={() => handleAction('simulate')}
+                                className="icon-btn text-orange-text"
+                                title="Fast Forward Simulation"
+                                aria-label="Fast forward simulation"
+                            >
+                                <Zap className="h-[18px] w-[18px]" aria-hidden="true" />
+                            </button>
+                        )}
+                        <button className="icon-btn hidden sm:inline-flex" title="Call" aria-label="Call">
+                            <Phone className="h-[18px] w-[18px]" aria-hidden="true" />
+                        </button>
+                        <button className="icon-btn hidden sm:inline-flex" title="Message" aria-label="Message">
+                            <MessageSquare className="h-[18px] w-[18px]" aria-hidden="true" />
+                        </button>
+                        <button className="icon-btn hidden sm:inline-flex" title="Safety" aria-label="Safety">
+                            <Shield className="h-[18px] w-[18px]" aria-hidden="true" />
+                        </button>
+                        <button onClick={onClose} className="icon-btn" title="Minimize" aria-label="Minimize">
+                            <Minimize2 className="h-[18px] w-[18px]" aria-hidden="true" />
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            {/* Trip card */}
+            <div className="pointer-events-none absolute inset-x-4 top-[calc(env(safe-area-inset-top)+76px)] z-[1000] sm:inset-x-5 md:right-auto md:w-[360px]">
+                <div className="material-thick pointer-events-auto animate-pop rounded-[20px] p-4 shadow-float">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-fill text-label-2" aria-hidden="true">
+                            <Users className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <h3 className="text-headline text-label">{partnerName}</h3>
+                            <div className="flex items-center gap-1 text-footnote text-label-2">
+                                <Star className="h-3 w-3 text-sys-orange" fill="currentColor" aria-hidden="true" />
+                                <span>4.9</span>
                             </div>
                         </div>
+                        <span className={`pill ${statusPill}`}>{statusLabel}</span>
+                    </div>
 
-                        <div className="space-y-4">
-                            <div className="flex gap-3 relative">
-                                <div className="flex flex-col items-center mt-1">
-                                    <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                                    <div className="w-0.5 h-full bg-slate-700 my-1" />
-                                    <div className="w-2 h-2 rounded-full bg-blue-500" />
-                                </div>
-                                <div className="space-y-4 flex-1">
-                                    <div className="bg-slate-700/50 p-3 rounded-lg">
-                                        <p className="text-xs text-slate-400 uppercase tracking-wide">Pickup</p>
-                                        <p className="font-medium text-slate-200">{status.pickup?.name}</p>
-                                    </div>
-                                    <div className="bg-slate-700/50 p-3 rounded-lg">
-                                        <p className="text-xs text-slate-400 uppercase tracking-wide">Dropoff</p>
-                                        <p className="font-medium text-slate-200">{status.trip?.destination ?? status.station?.name}</p>
-                                    </div>
-                                    {typeof seats === 'number' && (
-                                        <div className="bg-slate-700/50 p-3 rounded-lg flex justify-between items-center">
-                                            <p className="text-xs text-slate-400 uppercase tracking-wide">Seats Available</p>
-                                            <p className="font-bold text-white text-lg">{seats}</p>
-                                        </div>
-                                    )}
-                                </div>
+                    <div className="mt-4 rounded-[14px] bg-fill">
+                        <div className="relative flex items-start gap-3 px-3.5 py-3">
+                            <span className="mt-1 flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-sys-green ring-[3px] ring-sys-green/25" aria-hidden="true" />
+                            <div className="min-w-0">
+                                <p className="text-caption-2 font-semibold uppercase tracking-[0.05em] text-label-2">Pickup</p>
+                                <p className="truncate text-subhead font-medium text-label">{status.pickup?.name}</p>
+                            </div>
+                            {/* connector between the two stops */}
+                            <span className="absolute -bottom-2 left-[19.5px] h-4 border-l-2 border-dotted border-label-3" aria-hidden="true" />
+                        </div>
+                        <div className="hairline-t ml-[38px]" />
+                        <div className="flex items-start gap-3 px-3.5 py-3">
+                            <span className="mt-1 flex h-3 w-3 shrink-0 items-center justify-center rounded-[3px] bg-sys-red ring-[3px] ring-sys-red/20" aria-hidden="true" />
+                            <div className="min-w-0">
+                                <p className="text-caption-2 font-semibold uppercase tracking-[0.05em] text-label-2">Dropoff</p>
+                                <p className="truncate text-subhead font-medium text-label">{status.trip?.destination ?? status.station?.name}</p>
                             </div>
                         </div>
                     </div>
+                    {typeof seats === 'number' && (
+                        <div className="mt-3 flex items-center justify-between px-1">
+                            <p className="text-footnote text-label-2">Seats Available</p>
+                            <p className="tabular text-headline text-label">{seats}</p>
+                        </div>
+                    )}
                 </div>
             </div>
 
             {/* Bottom Actions */}
-            <div className="bg-slate-800 p-6 border-t border-slate-700 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.3)] z-10">
+            <div
+                ref={sheetRef}
+                className="material-thick absolute inset-x-0 bottom-0 z-[1000] rounded-t-[22px] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-float md:bottom-5 md:left-5 md:right-auto md:w-[360px] md:rounded-[20px]"
+            >
                 {isDriver ? (
                     <div className="flex gap-3">
                         {status.status === 'awaiting_pickup' || status.status === 'pending' ? (
                             <button
                                 onClick={() => handleAction('pickup')}
-                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 transition transform active:scale-95 flex items-center justify-center gap-2"
+                                className="btn btn-filled btn-lg flex-1"
                             >
-                                <Navigation size={20} />
+                                <Navigation className="h-5 w-5" aria-hidden="true" />
                                 Arrived at Pickup
                             </button>
                         ) : status.status === 'in_progress' ? (
                             <button
                                 onClick={() => handleAction('dropoff')}
-                                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-900/20 transition transform active:scale-95 flex items-center justify-center gap-2"
+                                className="btn btn-filled btn-lg flex-1"
                             >
-                                <MapPin size={20} />
+                                <MapPin className="h-5 w-5" aria-hidden="true" />
                                 Complete Dropoff
                             </button>
                         ) : (
-                            <div className="p-4 rounded-xl bg-slate-700/50 text-center w-full">
-                                <p className="text-slate-300 font-medium">Trip Completed</p>
+                            <div className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-sys-green/15 text-headline text-green-text">
+                                <CircleCheck className="h-5 w-5" aria-hidden="true" />
+                                Trip Completed
                             </div>
                         )}
                     </div>
                 ) : (
-                    <div className="bg-slate-700/50 rounded-xl p-4 text-center">
-                        <p className="text-slate-300 font-medium animate-pulse">
+                    <div className="flex min-h-[50px] items-center justify-center gap-2.5 rounded-full bg-fill px-4 text-center">
+                        {completed ? (
+                            <CircleCheck className="h-5 w-5 text-green-text" aria-hidden="true" />
+                        ) : (
+                            <span className="h-2 w-2 shrink-0 animate-breathe rounded-full bg-sys-blue" aria-hidden="true" />
+                        )}
+                        <p className="text-callout font-medium text-label">
                             {status.status === 'awaiting_pickup' || status.status === 'pending' ? 'Your driver is on the way' : status.status === 'in_progress' ? 'Enjoy your LastMile Trip' : 'Trip Completed'}
                         </p>
                     </div>

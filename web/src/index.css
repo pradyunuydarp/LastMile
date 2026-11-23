@@ -2,6 +2,521 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-slate-900 text-white;
+/* ------------------------------------------------------------------------
+   Design tokens (Apple Human Interface Guidelines system colours).
+   Channels are space-separated so Tailwind can apply opacity modifiers:
+   bg-sys-blue/15, text-label-2, etc. "-text" variants are the system colours
+   tuned so text stays at >= 4.5:1 on grouped backgrounds and on tints.
+   ------------------------------------------------------------------------ */
+:root {
+    color-scheme: light dark;
+
+    --sys-blue: 0 122 255;          /* #007AFF */
+    --sys-green: 52 199 89;         /* #34C759 */
+    --sys-red: 255 59 48;           /* #FF3B30 */
+    --sys-orange: 255 149 0;        /* #FF9500 */
+    --sys-yellow: 255 204 0;        /* #FFCC00 */
+    --sys-indigo: 88 86 214;        /* #5856D6 */
+    --sys-teal: 48 176 199;         /* #30B0C7 */
+    --sys-gray: 142 142 147;        /* #8E8E93 */
+
+    --blue-text: 0 98 196;
+    --green-text: 30 123 52;
+    --red-text: 215 0 21;
+    --orange-text: 178 80 0;
+    --indigo-text: 88 86 214;
+    --accent: 0 113 227;            /* filled buttons, white label 4.7:1 */
+
+    --label: 29 29 31;
+    --label-2: 106 106 112;         /* secondary label, 4.7:1 on fills */
+    --label-3: 174 174 178;         /* icons / chevrons only */
+
+    --bg-grouped: 242 242 247;      /* systemGroupedBackground */
+    --bg-grouped-2: 255 255 255;    /* secondarySystemGroupedBackground */
+    --bg-grouped-3: 242 242 247;    /* tertiarySystemGroupedBackground */
+    --fill: rgb(118 118 128 / 0.12);
+    --fill-2: rgb(118 118 128 / 0.2);
+    --separator: rgb(60 60 67 / 0.29);
+    --tint-a: 0.12;
+
+    --material: 249 249 251;
+    --material-a: 0.78;
+    --material-thick: 255 255 255;
+    --material-thick-a: 0.84;
+    --segment-thumb: 255 255 255;
+    --map-bg: 233 236 240;
+
+    --hairline: 1px;
+    --spring: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@media (min-resolution: 2dppx) {
+    :root { --hairline: 0.5px; }
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --sys-blue: 10 132 255;         /* #0A84FF */
+        --sys-green: 48 209 88;         /* #30D158 */
+        --sys-red: 255 69 58;           /* #FF453A */
+        --sys-orange: 255 159 10;       /* #FF9F0A */
+        --sys-yellow: 255 214 10;
+        --sys-indigo: 94 92 230;
+        --sys-teal: 64 200 224;
+        --sys-gray: 142 142 147;
+
+        --blue-text: 90 171 255;
+        --green-text: 48 209 88;
+        --red-text: 255 105 97;
+        --orange-text: 255 159 10;
+        --indigo-text: 142 140 255;
+        --accent: 0 113 227;
+
+        --label: 255 255 255;
+        --label-2: 160 160 166;
+        --label-3: 99 99 102;
+
+        --bg-grouped: 0 0 0;
+        --bg-grouped-2: 28 28 30;       /* #1C1C1E */
+        --bg-grouped-3: 44 44 46;       /* #2C2C2E */
+        --fill: rgb(118 118 128 / 0.24);
+        --fill-2: rgb(118 118 128 / 0.34);
+        --separator: rgb(84 84 88 / 0.65);
+        --tint-a: 0.18;
+
+        --material: 22 22 24;
+        --material-a: 0.72;
+        --material-thick: 40 40 42;
+        --material-thick-a: 0.8;
+        --segment-thumb: 99 99 102;
+        --map-bg: 38 38 40;
+    }
+}
+
+@layer base {
+    html {
+        -webkit-text-size-adjust: 100%;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+        @apply bg-grouped font-sans text-subhead text-label;
+        font-feature-settings: "cv11", "ss01";
+        min-height: 100vh;
+    }
+
+    h1, h2, h3 {
+        @apply font-display;
+    }
+
+    ::selection {
+        background: rgb(var(--sys-blue) / 0.25);
+    }
+
+    :focus-visible {
+        outline: 3px solid rgb(var(--sys-blue) / 0.55);
+        outline-offset: 2px;
+    }
+
+    input::placeholder {
+        color: rgb(var(--label-2));
+        opacity: 1;
+    }
+}
+
+@layer components {
+    /* Materials ---------------------------------------------------------- */
+    .material {
+        background-color: rgb(var(--material) / var(--material-a));
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+        backdrop-filter: saturate(180%) blur(20px);
+    }
+    .material-thick {
+        background-color: rgb(var(--material-thick) / var(--material-thick-a));
+        -webkit-backdrop-filter: saturate(180%) blur(28px);
+        backdrop-filter: saturate(180%) blur(28px);
+        border: var(--hairline) solid rgb(0 0 0 / 0.05);
+    }
+    @media (prefers-color-scheme: dark) {
+        .material-thick { border-color: rgb(255 255 255 / 0.1); }
+    }
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+        .material { background-color: rgb(var(--material) / 0.97); }
+        .material-thick { background-color: rgb(var(--material-thick) / 0.98); }
+    }
+    .hairline-b { border-bottom: var(--hairline) solid var(--separator); }
+    .hairline-t { border-top: var(--hairline) solid var(--separator); }
+    .hairline-ring { box-shadow: inset 0 0 0 var(--hairline) var(--separator); }
+
+    /* Cards & lists ------------------------------------------------------ */
+    .card {
+        @apply rounded-card bg-grouped-2 p-5 sm:p-6;
+    }
+    .card-title {
+        @apply text-title-3 text-label;
+    }
+    .card-subtitle {
+        @apply mt-0.5 text-subhead text-label-2;
+    }
+    .section-label {
+        @apply px-1 text-footnote font-medium uppercase tracking-[0.04em] text-label-2;
+    }
+    .list {
+        @apply overflow-hidden rounded-[14px] bg-grouped-3;
+    }
+    .list-plain {
+        @apply overflow-hidden rounded-[14px] bg-grouped-2;
+    }
+    .list-row {
+        @apply relative flex items-center gap-3 px-4 py-3;
+    }
+    .list-row + .list-row::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        right: 0;
+        left: var(--row-inset, 16px);
+        border-top: var(--hairline) solid var(--separator);
+    }
+    .stat {
+        @apply rounded-[14px] bg-grouped-3 p-4;
+    }
+    .icon-tile {
+        @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-white;
+    }
+
+    /* Buttons ------------------------------------------------------------ */
+    .btn {
+        @apply relative inline-flex min-h-[44px] select-none items-center justify-center gap-2 rounded-full px-5 text-callout font-semibold;
+        transition: transform 180ms var(--spring), background-color 200ms ease, color 200ms ease, opacity 200ms ease, filter 200ms ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active:not(:disabled) { transform: scale(0.97); }
+    .btn:disabled { @apply cursor-not-allowed opacity-40; }
+    .btn-sm { @apply min-h-[34px] px-4 text-subhead; }
+    .btn-lg { @apply min-h-[50px] px-6 text-headline; }
+
+    .btn-filled { @apply bg-accent text-white; }
+    .btn-filled:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-filled:active:not(:disabled) { filter: brightness(0.9); }
+
+    .btn-tinted {
+        @apply text-blue-text;
+        background-color: rgb(var(--sys-blue) / var(--tint-a));
+    }
+    .btn-tinted:hover:not(:disabled) { background-color: rgb(var(--sys-blue) / calc(var(--tint-a) + 0.06)); }
+
+    .btn-gray { @apply bg-fill text-label; }
+    .btn-gray:hover:not(:disabled) { @apply bg-fill-2; }
+
+    .btn-destructive { @apply bg-fill text-red-text; }
+    .btn-destructive:hover:not(:disabled) { @apply bg-fill-2; }
+
+    .btn-plain { @apply min-h-0 bg-transparent px-2 text-blue-text; }
+    .btn-plain:hover:not(:disabled) { @apply bg-fill; }
+
+    .icon-btn {
+        @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fill text-label;
+        transition: transform 180ms var(--spring), background-color 200ms ease;
+    }
+    .icon-btn:hover { @apply bg-fill-2; }
+    .icon-btn:active { transform: scale(0.92); }
+
+    /* Segmented control -------------------------------------------------- */
+    .segmented {
+        @apply relative grid rounded-[9px] bg-fill p-[2px];
+        grid-auto-columns: minmax(0, 1fr);
+        grid-auto-flow: column;
+    }
+    .segmented-thumb {
+        @apply pointer-events-none absolute bottom-[2px] left-[2px] top-[2px] rounded-[7px] shadow-thumb;
+        width: calc((100% - 4px) / var(--n));
+        transform: translateX(calc(100% * var(--i)));
+        background-color: rgb(var(--segment-thumb));
+        transition: transform 320ms var(--spring);
+    }
+    .segment {
+        @apply relative z-[1] min-h-[30px] truncate rounded-[7px] px-1 text-footnote font-medium text-label sm:px-3;
+        transition: opacity 200ms ease;
+    }
+    .segment[aria-pressed="true"] { @apply font-semibold; }
+    .segment:not([aria-pressed="true"]):hover { opacity: 0.7; }
+    .segmented-lg .segment { @apply min-h-[34px] text-subhead; }
+
+    /* Chips -------------------------------------------------------------- */
+    .chip {
+        @apply relative flex min-h-[44px] w-full items-center gap-3 rounded-[12px] bg-fill px-3.5 py-2.5 text-left text-label;
+        transition: transform 180ms var(--spring), background-color 200ms ease, box-shadow 200ms ease;
+    }
+    .chip:hover { @apply bg-fill-2; }
+    .chip:active { transform: scale(0.98); }
+    .chip[aria-pressed="true"] {
+        background-color: rgb(var(--sys-blue) / var(--tint-a));
+        box-shadow: inset 0 0 0 1.5px rgb(var(--sys-blue));
+    }
+    .chip-check {
+        @apply inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-transparent;
+        box-shadow: inset 0 0 0 1.5px rgb(var(--label-3));
+        transition: background-color 200ms ease, box-shadow 200ms ease, color 200ms ease;
+    }
+    .chip[aria-pressed="true"] .chip-check {
+        @apply bg-sys-blue text-white;
+        box-shadow: none;
+    }
+    .tag {
+        @apply inline-flex min-h-[34px] items-center justify-center rounded-full bg-fill px-3.5 text-footnote font-medium text-label;
+        transition: transform 180ms var(--spring), background-color 200ms ease, color 200ms ease;
+    }
+    .tag:hover { @apply bg-fill-2; }
+    .tag:active { transform: scale(0.96); }
+    .tag[aria-pressed="true"] { @apply bg-accent text-white; }
+
+    /* Status pills (small caps) ----------------------------------------- */
+    .pill {
+        @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-[3px] text-caption-2 font-semibold uppercase tracking-[0.05em];
+    }
+    .pill-dot { @apply h-1.5 w-1.5 rounded-full bg-current; }
+    .pill-gray { @apply bg-fill text-label-2; }
+    .pill-blue { @apply text-blue-text; background-color: rgb(var(--sys-blue) / var(--tint-a)); }
+    .pill-green { @apply text-green-text; background-color: rgb(var(--sys-green) / calc(var(--tint-a) + 0.02)); }
+    .pill-orange { @apply text-orange-text; background-color: rgb(var(--sys-orange) / calc(var(--tint-a) + 0.02)); }
+    .pill-red { @apply text-red-text; background-color: rgb(var(--sys-red) / var(--tint-a)); }
+    .pill-indigo { @apply text-indigo-text; background-color: rgb(var(--sys-indigo) / var(--tint-a)); }
+
+    /* Inline notices ---------------------------------------------------- */
+    .notice {
+        @apply flex items-start gap-3 rounded-[14px] px-4 py-3 text-subhead;
+    }
+    .notice-red { @apply text-red-text; background-color: rgb(var(--sys-red) / var(--tint-a)); }
+    .notice-green { @apply text-green-text; background-color: rgb(var(--sys-green) / calc(var(--tint-a) + 0.02)); }
+    .notice-blue { @apply text-blue-text; background-color: rgb(var(--sys-blue) / var(--tint-a)); }
+    .notice-gray { @apply bg-fill text-label-2; }
+
+    /* Fields ------------------------------------------------------------ */
+    .field {
+        @apply block min-h-[44px] w-full rounded-control bg-fill px-3.5 py-2.5 text-callout text-label;
+        transition: box-shadow 200ms ease, background-color 200ms ease;
+    }
+    .field:focus {
+        outline: none;
+        background-color: rgb(var(--bg-grouped-2));
+        box-shadow: 0 0 0 1px rgb(var(--sys-blue)), 0 0 0 4px rgb(var(--sys-blue) / 0.25);
+    }
+    .field-icon {
+        @apply pointer-events-none absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-label-2;
+    }
+
+    /* Maps -------------------------------------------------------------- */
+    .map-frame {
+        @apply relative overflow-hidden rounded-[14px];
+        isolation: isolate;
+        background-color: rgb(var(--map-bg));
+    }
+    .map-frame::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 450;
+        pointer-events: none;
+        border-radius: inherit;
+        box-shadow: inset 0 0 0 var(--hairline) rgb(0 0 0 / 0.08);
+    }
+    @media (prefers-color-scheme: dark) {
+        .map-frame::after { box-shadow: inset 0 0 0 var(--hairline) rgb(255 255 255 / 0.08); }
+    }
+}
+
+@layer utilities {
+    .animate-in {
+        animation: lm-rise 340ms var(--spring) both;
+    }
+    .animate-pop {
+        animation: lm-pop 380ms var(--spring) both;
+    }
+    .animate-fade {
+        animation: lm-fade 240ms ease-out both;
+    }
+    .animate-breathe {
+        animation: lm-breathe 2.4s ease-in-out infinite;
+    }
+    .tabular { font-variant-numeric: tabular-nums; }
+}
+
+@keyframes lm-rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+}
+@keyframes lm-pop {
+    from { opacity: 0; transform: translateY(6px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+}
+@keyframes lm-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes lm-breathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+@keyframes lm-halo {
+    0% { transform: scale(0.6); opacity: 0.55; }
+    100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes lm-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ------------------------------------------------------------------------
+   Leaflet, restyled to feel like Apple Maps.
+   ------------------------------------------------------------------------ */
+.leaflet-container {
+    isolation: isolate;
+    font-family: inherit;
+    background-color: rgb(var(--map-bg));
+    -webkit-tap-highlight-color: transparent;
+}
+.leaflet-container a { color: rgb(var(--blue-text)); }
+
+.leaflet-bar {
+    border: none !important;
+    border-radius: 10px !important;
+    overflow: hidden;
+    box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.06), 0 2px 10px rgb(0 0 0 / 0.14) !important;
+}
+.leaflet-bar a,
+.leaflet-bar a:hover {
+    width: 34px !important;
+    height: 34px !important;
+    line-height: 34px !important;
+    font-size: 18px !important;
+    font-weight: 500;
+    color: rgb(var(--label)) !important;
+    background-color: rgb(var(--material-thick) / 0.92) !important;
+    border-bottom: var(--hairline) solid var(--separator) !important;
+}
+.leaflet-bar a:last-child { border-bottom: none !important; }
+.leaflet-bar a:hover { background-color: rgb(var(--bg-grouped-3)) !important; }
+.leaflet-bar a.leaflet-disabled { color: rgb(var(--label-3)) !important; }
+
+.leaflet-control-attribution {
+    margin: 0 !important;
+    padding: 2px 8px !important;
+    border-top-left-radius: 8px;
+    font-size: 10px !important;
+    line-height: 14px;
+    color: rgb(var(--label-2)) !important;
+    background-color: rgb(var(--material) / 0.82) !important;
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+}
+.leaflet-control-attribution a { color: rgb(var(--blue-text)) !important; }
+.leaflet-control-attribution svg { display: none !important; }
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+    color: rgb(var(--label));
+    background-color: rgb(var(--material-thick) / 0.94);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.06), 0 6px 24px rgb(0 0 0 / 0.18);
+}
+.leaflet-popup-content-wrapper { border-radius: 14px; }
+.leaflet-popup-content {
+    margin: 10px 14px;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 500;
+}
+.leaflet-popup-content p { margin: 0; }
+.leaflet-container a.leaflet-popup-close-button {
+    color: rgb(var(--label-2));
+    top: 4px;
+    right: 4px;
+}
+
+/* Map markers (L.divIcon) */
+.lm-marker { background: transparent; border: none; }
+.lm-marker .lm-dot {
+    width: 100%;
+    height: 100%;
+    border-radius: 9999px;
+    background-color: rgb(var(--c, var(--sys-red)));
+    border: 3px solid #fff;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3), 0 4px 10px rgb(0 0 0 / 0.15);
+}
+.lm-marker .lm-badge {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    color: #fff;
+    font: 700 12px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Inter, sans-serif;
+    background-color: rgb(var(--c, var(--sys-blue)));
+    border: 2.5px solid #fff;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3), 0 6px 14px rgb(0 0 0 / 0.18);
+}
+.lm-marker .lm-badge svg { width: 58%; height: 58%; }
+.lm-marker .lm-user {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+.lm-marker .lm-user::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background-color: rgb(var(--sys-blue) / 0.35);
+    animation: lm-halo 2.2s ease-out infinite;
+}
+.lm-marker .lm-user::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 9999px;
+    background-color: rgb(var(--sys-blue));
+    border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
+}
+.transition-marker { transition: transform 1s linear; }
+
+.lm-route-casing { stroke: #fff; }
+.lm-route { stroke: rgb(var(--sys-blue)); }
+@media (prefers-color-scheme: dark) {
+    .lm-route-casing { stroke: rgb(0 0 0 / 0.6); }
+}
+
+/* Room overlay: keep Leaflet's bottom controls above the action sheet. */
+.room-map .leaflet-bottom { bottom: var(--sheet-h, 0px); }
+@media (min-width: 768px) {
+    .room-map .leaflet-bottom { bottom: 0; }
+}
+
+.spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 9999px;
+    border: 2.5px solid var(--fill-2);
+    border-top-color: rgb(var(--label-2));
+    animation: lm-spin 0.8s linear infinite;
+}
+
+/* ------------------------------------------------------------------------
+   Reduced motion: keep state changes, drop the movement.
+   ------------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    .spinner { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
+    .lm-marker .lm-user::before { animation: none !important; opacity: 0; }
 }
