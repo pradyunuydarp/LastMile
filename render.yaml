@@ -19,7 +19,9 @@
 #     address when the Blueprint syncs; nothing is hard-coded.
 #   * autoDeployTrigger is off everywhere: GitHub Actions deploys the exact
 #     commit that passed CI through the Render API (.github/workflows), right
-#     after running the database migrations.
+#     after running the database migrations. Also turn the Blueprint's
+#     Auto Sync off (Blueprint -> Settings), or a change to this file is
+#     applied and deployed before CI has run; click Manual Sync instead.
 #   * `sync: false` variables are secrets. Render asks for them once, when you
 #     create the Blueprint, and never overwrites them from this file.
 #   * region can't be changed after creation. Pick the one closest to your

@@ -46,6 +46,14 @@ make k8s-up                                     # minikube
 make help                                       # everything else
 ```
 
+## Deploy
+
+Production runs on **Render** (gateway, eight private microservices, the
+web app as a static site) with **Supabase** for Postgres and optional Auth.
+Every push to `main` that passes CI is migrated, deployed and verified by
+GitHub Actions. Setup, costs (about $70/month, or $0 with the single-container
+`render.free.yaml`) and troubleshooting: [`docs/deploy.md`](docs/deploy.md).
+
 ## Docs
 
 | | |
