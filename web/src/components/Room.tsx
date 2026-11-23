@@ -79,7 +79,15 @@ export function Room({ tripId, initialStatus, onClose, seats }: RoomProps) {
 
         const onStatus = (payload: TripStatusPayload) => {
             if (payload.tripId === tripId) {
-                setStatus(payload);
+                // Merge: status events don't repeat the trip/pickup details, so
+                // replacing the state would lose the drop-off destination.
+                setStatus((prev) => ({
+                    ...prev,
+                    ...payload,
+                    trip: payload.trip ?? prev.trip,
+                    pickup: payload.pickup ?? prev.pickup,
+                    station: payload.station ?? prev.station,
+                }));
                 if (payload.status === 'completed' || payload.status === 'cancelled') {
                     // Optional: Auto-close or show summary
                 }

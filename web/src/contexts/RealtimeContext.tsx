@@ -49,8 +49,17 @@ export type RiderStatus = {
     description?: string;
 };
 
+export type ApproachAlert = {
+    stationId: string;
+    stationName: string;
+    distanceMeters: number;
+    etaMinutes: number;
+    receivedAt: number;
+};
+
 type RealtimeContextValue = {
     socket: any | null;
+    approachAlert: ApproachAlert | null;
     ready: boolean;
     offers: DriverOffer[];
     queueSummary: DriverRequestsResponse | null;
@@ -78,6 +87,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
     const [roomsVersion, setRoomsVersion] = useState(0);
     const [riderStatus, setRiderStatus] = useState<RiderStatus | null>(null);
     const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
+    const [approachAlert, setApproachAlert] = useState<ApproachAlert | null>(null);
 
     useEffect(() => {
         if (!user?.id || !role) {
@@ -118,6 +128,11 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
         });
         client.on('driver:rider-queue', (payload: DriverRequestsResponse) => {
             setQueueSummary(payload);
+        });
+        // Location service saw the car enter a station's approach zone; the
+        // gateway ran matching and refreshed our rider queue.
+        client.on('driver:approaching-station', (payload: Omit<ApproachAlert, 'receivedAt'>) => {
+            setApproachAlert({ ...payload, receivedAt: Date.now() });
         });
         client.on('driver:rider-offer', (payload: any) => {
             const rider = payload?.rider ?? {};
@@ -289,6 +304,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
     const value = useMemo<RealtimeContextValue>(
         () => ({
             socket,
+            approachAlert,
             ready,
             offers,
             queueSummary,
@@ -299,7 +315,7 @@ export const RealtimeProvider = ({ children }: { children: React.ReactNode }) =>
             completeTrip,
             respondToApproval,
         }),
-        [socket, ready, offers, queueSummary, rooms, riderStatus, approvalRequest, respondToOffer, completeTrip, respondToApproval],
+        [socket, approachAlert, ready, offers, queueSummary, rooms, riderStatus, approvalRequest, respondToOffer, completeTrip, respondToApproval],
     );
 
     return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

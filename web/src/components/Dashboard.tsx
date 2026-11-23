@@ -47,7 +47,7 @@ const formatDistance = (meters?: number) => {
 
 export function Dashboard() {
     const { user, signOut, role: authRole } = useAuth();
-    const { ready: realtimeReady, socket, offers, queueSummary, rooms, riderStatus, approvalRequest, respondToOffer, completeTrip, respondToApproval } = useRealtime();
+    const { ready: realtimeReady, socket, approachAlert, offers, queueSummary, rooms, riderStatus, approvalRequest, respondToOffer, completeTrip, respondToApproval } = useRealtime();
     const [activeRoom, setActiveRoom] = useState<{ id: string; status: TripStatusPayload } | null>(null);
 
     useEffect(() => {
@@ -398,7 +398,7 @@ export function Dashboard() {
         try {
             const response = await saveDriverRoute({
                 driverId: user.id,
-                name: selfDriver?.name ?? user.email ?? 'Driver',
+                name: selfDriver?.name ?? (user.user_metadata?.full_name as string | undefined) ?? user.name ?? user.email ?? 'Driver',
                 carDetails: selfDriver?.carDetails ?? 'Metro Cab',
                 pickupPointIds: routePickupIds,
                 seats: Number.parseInt(routeSeatCount, 10) || 1,
@@ -621,6 +621,19 @@ export function Dashboard() {
             ) : (
                 <p className="text-slate-400 text-sm">Waiting for riders near your stations. Hang tight.</p>
             )}
+            {approachAlert && (
+                <div
+                    key={approachAlert.receivedAt}
+                    className="mt-4 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-100"
+                >
+                    <span className="font-semibold">Approaching {approachAlert.stationName}</span>
+                    {' · '}
+                    {(approachAlert.distanceMeters / 1000).toFixed(1)} km · ~{Math.max(1, Math.round(approachAlert.etaMinutes))} min out.
+                    <span className="block text-xs text-amber-200/80">
+                        Location service detected the approach zone; Matching just refreshed your rider list.
+                    </span>
+                </div>
+            )}
             <div className="border-t border-slate-700 pt-4 mt-4">
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-lg font-semibold">Live socket offers</h3>
@@ -763,6 +776,12 @@ export function Dashboard() {
                 <div className="bg-slate-900/40 border border-slate-700 rounded-lg p-4 space-y-2">
                     <div className="font-semibold">{bookingState.message}</div>
                     <div className="text-xs text-slate-400">Destination · {bookingState.requestedDestination}</div>
+                    {bookingState.matchedBy && (
+                        <div className="inline-flex items-center gap-2 rounded-full bg-violet-500/15 border border-violet-400/40 px-3 py-1 text-xs text-violet-200">
+                            <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />
+                            Decided by <span className="font-mono">{bookingState.matchedBy}</span>
+                        </div>
+                    )}
                     <div className="space-y-1">
                         {bookingState.attempts.map((attempt) => (
                             <div key={attempt.driverId} className="flex justify-between text-sm">
@@ -772,6 +791,12 @@ export function Dashboard() {
                                 <span className="text-slate-400">
                                     {attempt.accepted ? 'Accepted' : attempt.reason || 'Pending'}
                                 </span>
+                            </div>
+                        ))}
+                        {bookingState.rejections?.map((r) => (
+                            <div key={`rej-${r.driverId}`} className="flex justify-between gap-3 text-sm">
+                                <span className="text-slate-500 line-through">{r.driverName || r.driverId}</span>
+                                <span className="text-amber-300/80 text-right">{r.reason}</span>
                             </div>
                         ))}
                     </div>

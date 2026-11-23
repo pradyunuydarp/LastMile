@@ -130,6 +130,10 @@ export type BookRideResponse = {
   requestedDestination: string;
   attempts: DriverAttempt[];
   trip?: Trip;
+  /** Drivers the Matching service ruled out, with the reason. */
+  rejections?: DriverAttempt[];
+  /** Which Matching replica (pod) made the decision. */
+  matchedBy?: string;
 };
 
 export type DriverRoutePayload = {

@@ -11,6 +11,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      // Real-time offers, trip rooms and live locations ride socket.io.
+      '/socket.io': {
+        target: 'http://localhost:8082',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 })

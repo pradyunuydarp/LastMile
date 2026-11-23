@@ -4,6 +4,14 @@ import { Car, Mail, Lock, AlertCircle } from 'lucide-react';
 import { signIn, signUp } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
 
+// Seeded by the User service when it runs without Supabase (demo mode).
+const DEMO_ACCOUNTS: { label: string; email: string; role: 'rider' | 'driver' }[] = [
+    { label: 'Asha · driver', email: 'driver@lastmile.demo', role: 'driver' },
+    { label: 'Ravi · driver', email: 'driver2@lastmile.demo', role: 'driver' },
+    { label: 'Priya · rider', email: 'rider@lastmile.demo', role: 'rider' },
+    { label: 'Kabir · rider', email: 'rider2@lastmile.demo', role: 'rider' },
+];
+
 export function Login() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -139,6 +147,29 @@ export function Login() {
                         {loading ? 'Processing...' : isSignUp ? 'Create Account' : 'Sign In'}
                     </button>
                 </form>
+
+                {!isSignUp && (
+                    <div className="mt-6 rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+                        <p className="text-xs text-slate-400 uppercase tracking-wide mb-2">Demo accounts (password: lastmile)</p>
+                        <div className="grid grid-cols-2 gap-2">
+                            {DEMO_ACCOUNTS.map((account) => (
+                                <button
+                                    key={account.email}
+                                    type="button"
+                                    onClick={() => {
+                                        setEmail(account.email);
+                                        setPassword('lastmile');
+                                        setRole(account.role);
+                                    }}
+                                    className="rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1.5 text-left text-xs text-slate-200"
+                                >
+                                    <span className="block font-semibold">{account.label}</span>
+                                    <span className="text-slate-500">{account.email}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 <div className="mt-6 text-center">
                     <button
