@@ -1,64 +1,115 @@
-# Repository Guidelines
+# LastMile: guide for AI agents and humans
 
-## Project Structure & Module Organization
-- Go backend lives under `cmd/<service>/main.go` with shared code in `internal/<pkg>/` and reusable helpers in `pkg/`.  
-- API definitions belong in `api/<service>.proto`; generated stubs go to `gen/go/`.  
-- Frontend (if used) sits in `ui/`. Tests accompany code in the same package (`*_test.go`) or `ui/src/__tests__/`.
+Metro last-mile ride sharing as gRPC microservices on Kubernetes. Riders arrive
+at a metro station and need a short ride to a nearby area; drivers plan a
+route through stations with free seats. When a driver gets within a few
+minutes of a station, matching runs and pairs them with waiting riders going
+to the same place.
 
-## Build, Test, and Development Commands
-- `go mod tidy` – sync Go dependencies.  
-- `go test ./...` – run all Go unit tests.  
-- `go run ./cmd/<service>` – start a specific Go service locally.  
-- `npm install && npm test` (run inside `ui/`) – install and test the React UI.  
-- `npm start` (in `ui/`) – run the UI against local services.
+This file is the single source of truth for every coding agent (CLAUDE.md and
+GEMINI.md import it). Keep it accurate when the code changes.
 
-## Coding Style & Naming Conventions
-- Go: `gofmt` is required (`gofmt -w` before committing). Favor small interfaces, context-aware funcs (`ctx context.Context` first argument), and explicit errors. Packages use lowercase, no underscores; files are snake_case; exported identifiers are CamelCase.  
-- Proto: use `snake_case` fields, `UpperCamelCase` messages/services; keep RPC names verb-based (e.g., `ListDrivers`).  
-- JS/TS (UI): Prettier defaults; components in `PascalCase.tsx`; hooks in `useX.ts`.
+## Architecture
 
-## Testing Guidelines
-- Go: table-driven tests named `Test<Thing>`; use subtests for variants. Prefer fast, hermetic unit tests; integration tests may live in `internal/<pkg>/integration`.  
-- Aim to cover handlers, matching logic, and critical error paths.  
-- UI: Jest/RTL tests in `__tests__`; favor role-based queries.
+```
+web (React) / mobile (Expo)
+        │ HTTP + socket.io
+        ▼
+gateway (cmd/gateway, internal/api) ── /system/status, /healthz
+        │ gRPC via chassis.Dial (round_robin + retries + deadlines)
+        ├── user          :50052  auth + profiles (Supabase or in-memory demo accounts)
+        ├── driver        :50051  driver profiles and routes
+        ├── rider         :50055  rider registration
+        ├── station       :50056  station metadata (seeded from internal/catalog)
+        ├── location      :50054  GPS ingest, live fan-out, approach-zone detection
+        ├── matching      :50053  STATELESS matching rules; the one we scale 1→5
+        ├── trip          :50057  trip lifecycle API
+        └── notification  :50058  notification API
+```
 
-## Commit & Pull Request Guidelines
-- Commits: imperative, concise subject (e.g., `Add driver matching scorer`, `Fix rider ETA parsing`). Group related changes; avoid mixed concerns.  
-- PRs: include summary, testing evidence (`go test ./...`, UI tests if touched), and references to issues or spec sections. Add screenshots/GIFs for UI changes.
+Key flows:
+- **Booking:** rider books → gateway asks `Matching.RankDrivers` → offers go
+  to drivers over socket.io one at a time → driver accepts → rider approves →
+  trip room opens.
+- **Proximity trigger:** every GPS ping goes through `Location.UpdateLocation`;
+  when a driver *enters* a station's 1.5 km approach zone the gateway calls
+  `Matching.FindRiders` and pushes the result to the driver.
+- **Trip:** `awaiting_rider → pending → in_progress (at pickup) → completed
+  (at the rider's destination)`.
 
-## Security & Configuration Tips
-- Keep secrets out of the repo; use environment variables or Kubernetes secrets.  
-- Validate all external input (HTTP/gRPC); propagate context deadlines; log without leaking PII.  
-- Container images should be minimal (e.g., `distroless` or `alpine`) and expose only needed ports.
+Known architectural debts (see the `microservices-review` skill): the gateway
+still owns rider/trip/plan state; no token auth at the gateway; booking is not
+a saga; stores are in-memory.
 
-## Project 1 (LastMile) Quick Instructions
-- Goal: microservice app for metro last‑mile drop service with Riders/Drivers; matching occurs minutes before driver reaches station.  
-- Core services: User (auth/profiles), Driver (routes/stations/seats/location), Rider (arrival time/destination/status), Matching (location/time/destination match + notifications), Trip (lifecycle), Notification (push/real‑time), Location (ingest driver location + proximity), Station (station metadata/nearby areas).  
-- API: define gRPC protos under `api/` (messages/fields in snake_case; RPCs verb-based). Generate stubs to `gen/go/`.  
-- Minimal flow to demo: ingest station metadata → drivers register route + seats → riders post arrival time + destination → driver location updates hit Location svc → Matching triggers when driver nears station and destinations align → Trip created → Notification sent.  
-- Kubernetes demo expectations: deploy all services; show matching works; demonstrate resilience by killing a service pod; scale Matching svc 1→5 replicas (HPA or manual) and show continued matches.  
-- Start point suggestion: build Station + Driver + Rider + Matching first with in-memory stores; add Trip/Notification later; add tests for matching logic and proximity triggers.
+## Layout
 
-## Project 1 (LastMile) Full Spec (from MicroserviceAppSpec.pdf)
-- Purpose: connect metro riders with nearby drivers for short “last‑mile” drops; matching happens just minutes before a driver reaches the metro station. Riders publish arrival time + destination; drivers publish route, target station(s), and free seats, and stream live location updates.  
-- Station metadata: each station maintains a list of “nearby” areas; when a driver’s live location enters a nearby area, matching can trigger. Rider destination must match the driver’s target destination for a ride to be assigned.  
-- Required microservices (all gRPC, Kubernetes‑deployable):  
-  - **User** – rider/driver profiles; authN/authZ.  
-  - **Driver** – register routes, metro stations, seats; update live location + pickup status.  
-  - **Rider** – register metro arrival time + destination; track ride status.  
-  - **Matching** – match on location/time/destination; notify both parties.  
-  - **Trip** – manage lifecycle (scheduled/active/completed); track pickup + drop‑off.  
-  - **Notification** – push/real‑time updates to riders and drivers.  
-  - **Location** – ingest real‑time driver GPS updates; detect proximity for triggers.  
-  - **Station** – maintain station metadata; map stations to nearby areas.  
-- Deployment/demo requirements: run on Kubernetes; prove fault resilience by killing a service while system continues operating; scale Matching service from 1 to 5 replicas (HPA or manual) and keep matching functional.  
-- API expectations: publish Google gRPC service definitions; messages use `snake_case` fields, RPCs are verbs (e.g., `ListDrivers`, `RegisterRoute`).  
-- Data sources: in‑memory stores are acceptable for the first demo; design for pluggable persistence later.  
-- Success criteria: reliable matches near driver arrival; consistent trip state tracking; timely notifications; operational under single‑service failures; horizontal scalability of Matching.
+- `api/*.proto` — gRPC contracts. Generated Go in `gen/go/` (`make proto`).
+- `cmd/<service>/main.go` — ~15-line entrypoints built on the chassis.
+- `internal/<service>/` — service logic + tests.
+- `internal/api/` — the gateway (HTTP handlers, socket.io hub, simulation).
+- `internal/pkg/chassis/` — health, reflection, graceful shutdown, keepalive,
+  client dialing. Every service and client uses it.
+- `internal/catalog/` — Bengaluru stations and nearby areas (reference data).
+- `web/` — React + Vite + Tailwind. `mobile/` — Expo app.
+- `k8s/` — manifests. `docker-compose.yml` — same system without Kubernetes.
+- `scripts/run-local.sh`, `scripts/smoke.sh` — run everything, prove a ride works.
+- `docs/demo/` — the class demo (runbook, slides, interactive page).
+- `docs/history/` — earlier planning notes and agent prompts.
 
-## Project Context
-- Audience: commuters requesting short rides from metro stations; drivers offering routes with limited seats.  
-- Success criteria: reliable matches near station arrival time; consistent trip state tracking; timely notifications; system stays operational during single-service failures and scales matching under load.  
-- Constraints: use gRPC between services; target Kubernetes deployment; prefer small, independently deployable services with clear contracts.  
-- Tech defaults: Go for services; React (optional) for UI; in-memory storage acceptable initially, but design for pluggable persistence.  
-- Observability: add structured logging and basic health/readiness endpoints per service to aid Kubernetes liveness/readiness probes.
+## Commands
+
+```bash
+make race            # all Go tests with the race detector (run before every commit)
+make lint            # gofmt + go vet
+scripts/run-local.sh # every service as a local process
+scripts/smoke.sh     # one full ride against localhost:8082
+docker compose up --build --scale matching=3
+make k8s-up          # minikube: build images in-cluster + deploy
+cd web && pnpm install && pnpm dev
+```
+
+Demo accounts when Supabase is not configured (password `lastmile`):
+`driver@lastmile.demo`, `driver2@lastmile.demo`, `rider@lastmile.demo`,
+`rider2@lastmile.demo`. Three bot riders are seeded at gateway start.
+
+## Rules that keep this codebase healthy
+
+Go
+- `gofmt` everything. Context first argument. Return errors, don't panic.
+- **Never hold a mutex while doing I/O** (gRPC, Postgres, HTTP). Copy what
+  you need, unlock, call. The gateway once froze entirely because of this.
+- **Every outbound call gets a deadline** (`context.WithTimeout`).
+- Shared state behind `sync.Mutex`/`RWMutex`; `proto.Clone` what you store.
+  `go test -race` must stay clean.
+- Never keep a pointer into a slice across unlock/relock.
+- Validate inputs; nil-check nested proto messages.
+- Dial other services with `chassis.Dial`; build servers with `chassis.New`.
+
+gRPC / proto
+- Messages `UpperCamelCase`, fields `snake_case`, RPCs are verbs.
+- Never reuse or renumber fields; `reserved` removed ones.
+
+Tests
+- Table-driven `Test<Thing>` with subtests. Pure rules get pure tests
+  (`internal/matching/server_test.go`); service contracts are tested against
+  real servers over `bufconn` (`internal/api/gateway_test.go`).
+
+Commits & PRs
+- Imperative subject (`Add driver matching scorer`). One concern per commit.
+- PRs include what changed, why, and evidence (`make race`, smoke output,
+  screenshots for UI).
+
+Security
+- No secrets in the repo or `k8s/*.yaml`; use env vars / Kubernetes Secrets.
+- No PII (emails, tokens, passwords) in logs.
+
+## Course spec (Project 1: LastMile)
+
+Required services: User, Driver, Rider, Matching, Trip, Notification,
+Location, Station — all gRPC, all deployable on Kubernetes. Demo must show:
+matching riders with drivers; the system continuing to work when a service
+fails; Matching scaling from 1 to 5 replicas (HPA or manual) while matches
+continue. Matching triggers when a driver nears a station ("nearby" areas per
+station) and the rider's destination must equal the driver's. In-memory
+stores are acceptable. Full text: `docs/spec/overall-spec.md`,
+`docs/spec/MicroserviceAppSpec.pdf`.
