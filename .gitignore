@@ -1,66 +1,64 @@
-# If you prefer the allow list template instead o
-f the deny list, see community template:         
-# https://github.com/github/gitignore/blob/main/c
-ommunity/Golang/Go.AllowList.gitignore           
-#                                                
-# Binaries for programs and plugins              
-*.exe                                            
-*.exe~                                           
-*.dll                                            
-*.so                                             
-*.dylib                                          
-                                                 
-# Test binary, built with `go test -c`           
-*.test                                           
-                                                 
-# Code coverage profiles and other test artifacts
-*.out                                            
-coverage.*                                       
-*.coverprofile                                   
-profile.cov                                      
-                                                 
-# Dependency directories (remove the comment belo
-w to include it)                                 
-# vendor/                                        
-                                                 
-# Go workspace file                              
-go.work                                          
-go.work.sum                                      
-                                                 
-# env files                                       
-.env                                              
-.env.*                                            
-*.env                                            
-                                                 
-# Editor/IDE                                      
-.idea/                                         
-.vscode/                                        
-.zed/
-
-# Gemini CLI build/cache outputs
+# ---- Go -------------------------------------------------------------
+# Build output. `go build ./cmd/<svc>` drops a binary named after the
+# service in the repo root, so ignore those names explicitly.
+/bin/
+/dist/
+/driver
+/rider
+/station
+/trip
+/notification
+/location
+/matching
+/user
+/gateway
+/loadgen
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+go.work
+go.work.sum
 .gocache/
 .gomodcache/
-lastmile/
 
-# macOS cruft
+# ---- Secrets & env ---------------------------------------------------
+.env
+.env.*
+*.env
+!.env.example
+
+# ---- Editors / OS ----------------------------------------------------
+.idea/
+.vscode/
+.zed/
 .DS_Store
+Thumbs.db
 
-# Node / React Native artifacts
+# ---- Claude Code (personal, not shared) ------------------------------
+.claude/settings.local.json
+
+# ---- Node / web / mobile ---------------------------------------------
 node_modules/
 pnpm-lock.yaml
+web/dist/
 mobile/.expo/
 mobile/.expo-shared/
-mobile/node_modules/
 mobile/pnpm-lock.yaml
 mobile/dist/
 mobile/build/
+mobile/.metro*
+mobile/.cache/
 
 # iOS / CocoaPods
 mobile/ios/Pods/
 mobile/ios/build/
 mobile/ios/DerivedData/
 mobile/ios/*.xcworkspace
-
-# Expo / Metro caches
-mobile/.metro*
-mobile/.cache/
+/.run/
