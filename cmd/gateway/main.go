@@ -33,19 +33,27 @@ func main() {
 
 	// Every downstream is dialed through the chassis: lazy connect (services
 	// may start in any order), round_robin across replicas, and retries on
-	// UNAVAILABLE. Targets default to localhost for `make run-local`.
-	targets := map[string]string{
-		"driver":       getenv("DRIVER_ADDR", "localhost:50051"),
-		"user":         getenv("USER_ADDR", "localhost:50052"),
-		"matching":     getenv("MATCHING_ADDR", "localhost:50053"),
-		"location":     getenv("LOCATION_ADDR", "localhost:50054"),
-		"rider":        getenv("RIDER_ADDR", "localhost:50055"),
-		"station":      getenv("STATION_ADDR", "localhost:50056"),
-		"trip":         getenv("TRIP_ADDR", "localhost:50057"),
-		"notification": getenv("NOTIFICATION_ADDR", "localhost:50058"),
+	// UNAVAILABLE. Each target comes from <NAME>_ADDR (or, on Render,
+	// <NAME>_DISCOVERY_HOST + <NAME>_PORT; see chassis.Target) and defaults
+	// to localhost for `make run-local`.
+	defaults := map[string]string{
+		"driver":       "localhost:50051",
+		"user":         "localhost:50052",
+		"matching":     "localhost:50053",
+		"location":     "localhost:50054",
+		"rider":        "localhost:50055",
+		"station":      "localhost:50056",
+		"trip":         "localhost:50057",
+		"notification": "localhost:50058",
 	}
-	conns := make(map[string]*grpc.ClientConn, len(targets))
-	for name, target := range targets {
+	conns := make(map[string]*grpc.ClientConn, len(defaults))
+	for name, def := range defaults {
+		target, err := chassis.Target(strings.ToUpper(name), def)
+		if err != nil {
+			logger.Error("invalid service address", "service", name, "err", err)
+			os.Exit(1)
+		}
+		logger.Info("downstream target", "to", name, "target", target)
 		conn, err := chassis.Dial(target)
 		if err != nil {
 			logger.Error("invalid service address", "service", name, "target", target, "err", err)
@@ -82,6 +90,11 @@ func main() {
 
 	grpcAddr := getenv("GATEWAY_GRPC_ADDR", ":50060")
 	httpAddr := getenv("GATEWAY_HTTP_ADDR", ":8082")
+	if port := os.Getenv("PORT"); port != "" {
+		// Render (and most PaaS) tell a web service which port its public
+		// HTTP server must bind to; it wins over GATEWAY_HTTP_ADDR.
+		httpAddr = ":" + port
+	}
 
 	// gRPC edge (GatewayService) for non-browser clients.
 	grpcServer := grpc.NewServer()

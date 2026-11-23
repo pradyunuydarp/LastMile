@@ -120,12 +120,17 @@ func (s *Service) Shutdown() {
 	}
 }
 
-// Instance identifies this replica. In Kubernetes the hostname is the pod
-// name, which is exactly what we want to show when demonstrating load
-// balancing ("this match was served by matching-7d9f-x2k4p").
+// Instance identifies this replica, which is what we want to show when
+// demonstrating load balancing ("this match was served by
+// matching-7d9f-x2k4p"). In order of preference:
+//   - POD_NAME, set explicitly (Kubernetes downward API, docker compose)
+//   - RENDER_INSTANCE_ID, Render's unique id for each instance of a service
+//   - the hostname, which in Kubernetes is the pod name
 func Instance() string {
-	if v := os.Getenv("POD_NAME"); v != "" {
-		return v
+	for _, key := range []string{"POD_NAME", "RENDER_INSTANCE_ID"} {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
 	}
 	if h, err := os.Hostname(); err == nil {
 		return h

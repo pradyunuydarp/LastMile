@@ -1,0 +1,259 @@
+# LastMile on Render: the full microservices deployment (a Render "Blueprint").
+#
+# What this creates (docs/deploy.md has the picture and the costs):
+#   lastmile-gateway   web service: the only public backend (HTTPS, socket.io)
+#   lastmile-<name>    eight private services, one per microservice; they are
+#                      reachable only over Render's private network
+#   lastmile-web       static site: the React app on Render's CDN
+# The database is Supabase, outside Render (supabase/migrations).
+#
+# Things worth knowing when reading this file:
+#   * Every Go service is built from the same root Dockerfile. It needs
+#     `--build-arg SERVICE=<name>`; Render turns each service's environment
+#     variables into Docker build arguments, so the SERVICE variable below is
+#     that build argument (https://render.com/docs/docker).
+#   * Private services all listen on port 10000. Each runs in its own
+#     container with its own private IP, so the same port never clashes, and
+#     10000 is Render's default port, so `hostport` below always matches.
+#   * `fromService` fills a variable with another service's private-network
+#     address when the Blueprint syncs; nothing is hard-coded.
+#   * autoDeployTrigger is off everywhere: GitHub Actions deploys the exact
+#     commit that passed CI through the Render API (.github/workflows), right
+#     after running the database migrations.
+#   * `sync: false` variables are secrets. Render asks for them once, when you
+#     create the Blueprint, and never overwrites them from this file.
+#   * region can't be changed after creation. Pick the one closest to your
+#     users and your Supabase project; all services must share one region to
+#     be on the same private network.
+#
+# Spec: https://render.com/docs/blueprint-spec
+# Schema (validate in your editor): https://render.com/schema/render.yaml.json
+
+previews:
+  generation: "off" # no preview environments (each would be ten more services)
+
+services:
+  # ---- the public edge ------------------------------------------------------
+  - type: web
+    name: lastmile-gateway
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb # 0.5 CPU / 512 MB, formerly "starter"
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz # Render waits for 2xx here before switching traffic
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVICE # Docker build arg: which ./cmd/<name> to build
+        value: gateway
+      - key: PORT # the gateway's public HTTP port (cmd/gateway reads PORT)
+        value: "10000"
+      # Where each microservice lives on the private network ("host:port").
+      - key: DRIVER_ADDR
+        fromService:
+          type: pserv
+          name: lastmile-driver
+          property: hostport
+      - key: USER_ADDR
+        fromService:
+          type: pserv
+          name: lastmile-user
+          property: hostport
+      - key: LOCATION_ADDR
+        fromService:
+          type: pserv
+          name: lastmile-location
+          property: hostport
+      - key: RIDER_ADDR
+        fromService:
+          type: pserv
+          name: lastmile-rider
+          property: hostport
+      - key: STATION_ADDR
+        fromService:
+          type: pserv
+          name: lastmile-station
+          property: hostport
+      - key: TRIP_ADDR
+        fromService:
+          type: pserv
+          name: lastmile-trip
+          property: hostport
+      - key: NOTIFICATION_ADDR
+        fromService:
+          type: pserv
+          name: lastmile-notification
+          property: hostport
+      # Matching runs several instances. Its normal hostname would pin the
+      # gateway's single HTTP/2 connection to one of them, so the gateway
+      # dials Matching's *discovery* hostname instead, which resolves to every
+      # instance's IP. cmd/gateway turns these two values into
+      # MATCHING_ADDR=dns:///<discovery-host>:10000 and gRPC round-robins
+      # across all instances (internal/pkg/chassis/client.go explains why).
+      - key: MATCHING_DISCOVERY_HOST
+        fromService:
+          type: pserv
+          name: lastmile-matching
+          envVarKey: RENDER_DISCOVERY_SERVICE
+      - key: MATCHING_PORT
+        value: "10000"
+      # Supabase Postgres URI (Project settings -> Database -> Connection
+      # string -> URI, pooler host). Leave empty to run without history.
+      - key: PERSISTENCE_DSN
+        sync: false
+
+  # ---- the microservices (private) ------------------------------------------
+  - type: pserv
+    name: lastmile-matching
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    numInstances: 2 # stateless, so it scales; try 5 in the dashboard
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVICE
+        value: matching
+      - key: MATCHING_GRPC_ADDR
+        value: ":10000"
+
+  - type: pserv
+    name: lastmile-location
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVICE
+        value: location
+      - key: LOCATION_GRPC_ADDR
+        value: ":10000"
+      - key: STATION_ADDR # Location asks Station for each station's approach zone
+        fromService:
+          type: pserv
+          name: lastmile-station
+          property: hostport
+
+  - type: pserv
+    name: lastmile-user
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVICE
+        value: user
+      - key: USER_GRPC_ADDR
+        value: ":10000"
+      # Supabase Auth (Project settings -> API). Leave both empty to use the
+      # built-in demo accounts (driver@lastmile.demo / rider@lastmile.demo,
+      # password "lastmile").
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+
+  - type: pserv
+    name: lastmile-driver
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVICE
+        value: driver
+      - key: DRIVER_GRPC_ADDR
+        value: ":10000"
+
+  - type: pserv
+    name: lastmile-rider
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVICE
+        value: rider
+      - key: RIDER_GRPC_ADDR
+        value: ":10000"
+
+  - type: pserv
+    name: lastmile-station
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVICE
+        value: station
+      - key: STATION_GRPC_ADDR
+        value: ":10000"
+
+  - type: pserv
+    name: lastmile-trip
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVICE
+        value: trip
+      - key: TRIP_GRPC_ADDR
+        value: ":10000"
+
+  - type: pserv
+    name: lastmile-notification
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SERVICE
+        value: notification
+      - key: NOTIFICATION_GRPC_ADDR
+        value: ":10000"
+
+  # ---- the web app ------------------------------------------------------------
+  # Static sites live on Render's global CDN (no region, free). The build bakes
+  # the gateway's public URL into the JavaScript: web/vite.config.ts turns
+  # GATEWAY_HOST into VITE_GATEWAY_URL=https://<host>. Set VITE_GATEWAY_URL on
+  # this service yourself to override it (e.g. a custom domain).
+  - type: web
+    name: lastmile-web
+    runtime: static
+    buildCommand: cd web && npm install --no-audit --no-fund && npm run build
+    staticPublishPath: web/dist
+    autoDeployTrigger: "off"
+    envVars:
+      - key: NODE_VERSION # Vite 7 needs Node 20.19+; web/Dockerfile uses 22 too
+        value: "22"
+      - key: GATEWAY_HOST # e.g. lastmile-gateway.onrender.com
+        fromService:
+          type: web
+          name: lastmile-gateway
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+    routes:
+      # Client-side routing: serve the app for every path that isn't a file.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      # Vite fingerprints everything under /assets, so it can be cached forever.
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable

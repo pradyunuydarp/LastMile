@@ -847,7 +847,7 @@ func (g *Gateway) bookRide(payload bookRideRequest) (bookRideResponse, error) {
 		status = "awaiting_rider"
 		message = fmt.Sprintf("%s accepted. Confirm from your Riders tab.", attempts[acceptedIndex].DriverName)
 	} else if g.hub != nil && len(attempts) > 0 {
-		message = fmt.Sprintf("Contacting %d drivers near %s", len(attempts), station.Name)
+		message = fmt.Sprintf("Contacting %d %s near %s", len(attempts), plural(len(attempts), "driver", "drivers"), station.Name)
 	}
 
 	return bookRideResponse{
@@ -1823,6 +1823,13 @@ func (g *Gateway) maybeCompleteTrips(driverID string, lat, lon float64) {
 			g.hub.CompleteTrip(trip.ID, "auto-complete")
 		}
 	}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func (g *Gateway) setRiderStatusLocked(riderID, status string) {

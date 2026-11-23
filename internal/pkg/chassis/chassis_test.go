@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -172,4 +173,55 @@ func TestDefaultClientPinsOnePod(t *testing.T) {
 		servedBy[pod]++
 	}
 	assert.Len(t, servedBy, 1, "pick_first sends all 300 calls to a single pod: %v", servedBy)
+}
+
+// TestInstance checks which identity a replica reports (the UI shows it as
+// "Decided by <instance>").
+func TestInstance(t *testing.T) {
+	host, err := os.Hostname()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name, podName, renderID, want string
+	}{
+		{name: "kubernetes or compose", podName: "matching-7d9f-x2k4p", renderID: "srv-abc-123", want: "matching-7d9f-x2k4p"},
+		{name: "render", renderID: "srv-abc-123", want: "srv-abc-123"},
+		{name: "plain process", want: host},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("POD_NAME", tt.podName)
+			t.Setenv("RENDER_INSTANCE_ID", tt.renderID)
+			assert.Equal(t, tt.want, Instance())
+		})
+	}
+}
+
+// TestTarget covers how the gateway finds each downstream service.
+func TestTarget(t *testing.T) {
+	tests := []struct {
+		name             string
+		addr, host, port string
+		want             string
+		wantErr          bool
+	}{
+		{name: "default for run-local", want: "localhost:50053"},
+		{name: "explicit address wins", addr: "dns:///matching:50053", host: "ignored", port: "1", want: "dns:///matching:50053"},
+		{name: "render discovery hostname", host: "lastmile-matching-discovery", port: "10000", want: "dns:///lastmile-matching-discovery:10000"},
+		{name: "discovery host without port", host: "lastmile-matching-discovery", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MATCHING_ADDR", tt.addr)
+			t.Setenv("MATCHING_DISCOVERY_HOST", tt.host)
+			t.Setenv("MATCHING_PORT", tt.port)
+			got, err := Target("MATCHING", "localhost:50053")
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

@@ -1,6 +1,10 @@
 package chassis
 
 import (
+	"fmt"
+	"net"
+	"os"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -41,4 +45,30 @@ func Dial(target string, extra ...grpc.DialOption) (*grpc.ClientConn, error) {
 		grpc.WithDefaultServiceConfig(clientServiceConfig),
 	}, extra...)
 	return grpc.NewClient(target, opts...)
+}
+
+// Target returns the dial target for a downstream service, read from the
+// environment variables that start with prefix (for example "MATCHING"):
+//
+//  1. <PREFIX>_ADDR, used as is ("host:port" or "dns:///host:port");
+//  2. otherwise <PREFIX>_DISCOVERY_HOST and <PREFIX>_PORT, combined into
+//     "dns:///host:port". On Render a service's discovery hostname resolves
+//     to the IP of every running instance, so with round_robin the client
+//     spreads calls across all of them, like a headless Kubernetes Service.
+//     (render.yaml can't join two values into one string, hence two
+//     variables.)
+//  3. otherwise def.
+func Target(prefix, def string) (string, error) {
+	if addr := os.Getenv(prefix + "_ADDR"); addr != "" {
+		return addr, nil
+	}
+	host := os.Getenv(prefix + "_DISCOVERY_HOST")
+	if host == "" {
+		return def, nil
+	}
+	port := os.Getenv(prefix + "_PORT")
+	if port == "" {
+		return "", fmt.Errorf("%s_DISCOVERY_HOST is set but %s_PORT is not", prefix, prefix)
+	}
+	return "dns:///" + net.JoinHostPort(host, port), nil
 }
